@@ -1,0 +1,120 @@
+# This configuration file defines the ESPHome firmware for an ESP device
+# that communicates with an Autoslide automatic door opener via UART.
+
+# --- 1. Basic ESPHome Configuration ---
+esphome:
+  name: autoslide-door-controller
+  friendly_name: Autoslide Door
+
+# Enable logging for debugging
+logger:
+  level: INFO
+
+# --- 2. Custom Component Definition ---
+# Points ESPHome to your local custom_components folder
+external_components:
+  - source:
+      type: local
+      path: custom_components
+    components: [ autoslide_door ]
+
+# --- 3. UART Setup (Final attempt to resolve YAML parsing and type conflict) ---
+# FIX: The list format is critical for non-default UART bus, but the parser is strict.
+# This structure ensures list item consistency.
+uart:
+  - id: uart_bus
+    tx_pin: GPIO17 # Standard TX pin for UART 2 on many ESP32 boards
+    rx_pin: GPIO16 # Standard RX pin for UART 2 on many ESP32 boards
+    baud_rate: 9600 # The recommended baud rate for the Autoslide interface
+
+# --- 4. ESP32 Configuration (Updated to use ESP-IDF framework) ---
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# --- 5. Component Platform Declarations (Required) ---
+# Even though the entities are implemented inside the custom component,
+# ESPHome requires these base platforms to be initialized at the top level.
+button:
+select:
+switch:
+number:
+text_sensor:
+
+# --- 6. Custom Autoslide Door Component Implementation ---
+autoslide_door:
+  id: autoslide_door_component
+  uart_id: uart_bus
+
+  # 1. Button for Master Trigger ('b:0')
+  trigger_button:
+    name: Autoslide Master Trigger
+    icon: mdi:door-open
+
+  # 2. Select for Door Mode ('a')
+  # Options must match the list defined in __init__.py (Auto, Stack, Lock, Pet)
+  mode_select:
+    name: Autoslide Door Mode
+    id: autoslide_mode_select
+    icon: mdi:gesture-swipe-horizontal
+    options:
+      - Auto
+      - Stack
+      - Lock
+      - Pet
+
+  # 3. Switch for Open Speed ('e')
+  open_speed_switch:
+    name: Autoslide Open Speed
+    icon: mdi:speedometer-slow
+
+  # 4. Switch for Secure Pet Mode ('g')
+  secure_pet_switch:
+    name: Autoslide Secure Pet Mode
+    icon: mdi:lock-alert
+
+  # 5. Number for Open Hold Duration ('j')
+  open_hold_number:
+    name: Autoslide Open Hold Time
+    icon: mdi:timer-sand
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 25
+    step: 1
+
+  # 6. Number for Open Force ('C')
+  open_open_force_number:
+    name: Autoslide Open Force
+    icon: mdi:run-fast
+    min_value: 0
+    max_value: 7
+    step: 1
+
+  # 7. Number for Close Force ('Z')
+  close_force_number:
+    name: Autoslide Close Force
+    icon: mdi:close-box-multiple
+    min_value: 0
+    max_value: 7
+    step: 1
+
+  # 8. Number for Close End Force ('A')
+  close_end_force_number:
+    name: Autoslide Close End Force
+    icon: mdi:close-box
+    min_value: 0
+    max_value: 7
+    step: 1
+
+  # 9. Read-only Text Sensor for Motion State ('m')
+  motion_state_sensor:
+    name: Autoslide Motion State
+    id: autoslide_motion_state
+    icon: mdi:motion-sensor
+
+  # 10. Read-only Text Sensor for Lock State ('c')
+  lock_state_sensor:
+    name: Autoslide Lock State
+    id: autoslide_lock_state
+    icon: mdi:door-closed-lock
