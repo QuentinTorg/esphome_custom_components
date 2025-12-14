@@ -82,43 +82,56 @@ class AutoslideDoor;
 class AutoslideModeSelect : public select::Select
 {
  public:
-  AutoslideModeSelect(AutoslideDoor *parent) : parent_(parent) {}
+  AutoslideModeSelect() = default;
+  explicit AutoslideModeSelect(AutoslideDoor *parent) : parent_(parent) {}
+  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
   void control(const std::string &value) override;
+
  protected:
-  AutoslideDoor *parent_;
+  AutoslideDoor *parent_{nullptr};
 };
 
-// Custom Number class for Open Hold, Forces ('j', 'C', 'Z', 'A')
+// Custom Number class for Open Hold, Forces ('j', 'C', 'z', 'A')
 class AutoslideSettingNumber : public number::Number
 {
  public:
-  AutoslideSettingNumber(AutoslideDoor *parent, char key) : parent_(parent), key_(key) {}
+  AutoslideSettingNumber() = default;
+  AutoslideSettingNumber(AutoslideDoor *parent, uint8_t key) : parent_(parent), key_((char) key) {}
+  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
+  void set_key(uint8_t key) { key_ = (char) key; }
   void control(float value) override;
+
  protected:
-  AutoslideDoor *parent_;
-  char key_;
+  AutoslideDoor *parent_{nullptr};
+  char key_{0};
 };
 
 // Custom Switch class for Open Speed and Secure Pet ('e', 'g')
 class AutoslideOnOffSwitch : public switch_::Switch
 {
  public:
-  AutoslideOnOffSwitch(AutoslideDoor *parent, char key) : parent_(parent), key_(key) {}
+  AutoslideOnOffSwitch() = default;
+  AutoslideOnOffSwitch(AutoslideDoor *parent, uint8_t key) : parent_(parent), key_((char) key) {}
+  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
+  void set_key(uint8_t key) { key_ = (char) key; }
   void write_state(bool value) override;
+
  protected:
-  AutoslideDoor *parent_;
-  char key_;
+  AutoslideDoor *parent_{nullptr};
+  char key_{0};
 };
 
 class AutoslideOpenButton : public button::Button
 {
  public:
+  AutoslideOpenButton() = default;
   explicit AutoslideOpenButton(AutoslideDoor *parent) : parent_(parent) {}
+  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
 
  protected:
   void press_action() override;
 
-  AutoslideDoor *parent_;
+  AutoslideDoor *parent_{nullptr};
 };
 
 // --- Main Component Class ---
