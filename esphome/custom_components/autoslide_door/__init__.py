@@ -31,6 +31,12 @@ CONF_LOCK_STATE_SENSOR = "lock_state"
 CONF_OPEN_BUTTON = "open_button"
 CONF_BUSY_SENSOR = "busy"
 
+# --- Classes for entities we construct ---
+AutoslideModeSelect = autoslide_ns.class_("AutoslideModeSelect", select.Select)
+AutoslideOnOffSwitch = autoslide_ns.class_("AutoslideOnOffSwitch", switch.Switch)
+AutoslideSettingNumber = autoslide_ns.class_("AutoslideSettingNumber", number.Number)
+AutoslideOpenButton = autoslide_ns.class_("AutoslideOpenButton", button.Button)
+
 # --- Schema ---
 
 CONFIG_SCHEMA = (
@@ -38,41 +44,25 @@ CONFIG_SCHEMA = (
         {
             cv.GenerateID(): cv.declare_id(AutoslideDoor),
 
-            cv.Optional(CONF_MODE_SELECT): select.select_schema(
-                autoslide_ns.class_("AutoslideModeSelect", select.Select)
-            ),
+            cv.Optional(CONF_MODE_SELECT): select.select_schema(AutoslideModeSelect),
 
-            cv.Optional(CONF_OPEN_SPEED_SWITCH): switch.switch_schema(
-                autoslide_ns.class_("AutoslideOnOffSwitch", switch.Switch)
-            ),
+            cv.Optional(CONF_OPEN_SPEED_SWITCH): switch.switch_schema(AutoslideOnOffSwitch),
 
-            cv.Optional(CONF_SECURE_PET_SWITCH): switch.switch_schema(
-                autoslide_ns.class_("AutoslideOnOffSwitch", switch.Switch)
-            ),
+            cv.Optional(CONF_SECURE_PET_SWITCH): switch.switch_schema(AutoslideOnOffSwitch),
 
-            cv.Optional(CONF_OPEN_HOLD_NUMBER): number.number_schema(
-                autoslide_ns.class_("AutoslideSettingNumber", number.Number)
-            ),
+            cv.Optional(CONF_OPEN_HOLD_NUMBER): number.number_schema(AutoslideSettingNumber),
 
-            cv.Optional(CONF_OPEN_FORCE_NUMBER): number.number_schema(
-                autoslide_ns.class_("AutoslideSettingNumber", number.Number)
-            ),
+            cv.Optional(CONF_OPEN_FORCE_NUMBER): number.number_schema(AutoslideSettingNumber),
 
-            cv.Optional(CONF_CLOSE_FORCE_NUMBER): number.number_schema(
-                autoslide_ns.class_("AutoslideSettingNumber", number.Number)
-            ),
+            cv.Optional(CONF_CLOSE_FORCE_NUMBER): number.number_schema(AutoslideSettingNumber),
 
-            cv.Optional(CONF_CLOSE_END_FORCE_NUMBER): number.number_schema(
-                autoslide_ns.class_("AutoslideSettingNumber", number.Number)
-            ),
+            cv.Optional(CONF_CLOSE_END_FORCE_NUMBER): number.number_schema(AutoslideSettingNumber),
 
             cv.Optional(CONF_MOTION_STATE_SENSOR): text_sensor.text_sensor_schema(),
 
             cv.Optional(CONF_LOCK_STATE_SENSOR): text_sensor.text_sensor_schema(),
 
-            cv.Optional(CONF_OPEN_BUTTON): button.button_schema(
-                autoslide_ns.class_("AutoslideOpenButton", button.Button)
-            ),
+            cv.Optional(CONF_OPEN_BUTTON): button.button_schema(AutoslideOpenButton),
 
             cv.Optional(CONF_BUSY_SENSOR): binary_sensor.binary_sensor_schema(),
         }
@@ -101,12 +91,14 @@ async def to_code(config):
     if CONF_OPEN_SPEED_SWITCH in config:
         sw = await switch.new_switch(config[CONF_OPEN_SPEED_SWITCH])
         cg.add(sw.set_parent(var))
+        cg.add(sw.set_key(ord('e')))
         cg.add(var.set_open_speed_switch(sw))
 
     # --- Secure Pet Switch ('g') ---
     if CONF_SECURE_PET_SWITCH in config:
         sw = await switch.new_switch(config[CONF_SECURE_PET_SWITCH])
         cg.add(sw.set_parent(var))
+        cg.add(sw.set_key(ord('g')))
         cg.add(var.set_secure_pet_switch(sw))
 
     # --- Numbers ---
@@ -118,6 +110,7 @@ async def to_code(config):
             step=1,
         )
         cg.add(num.set_parent(var))
+        cg.add(num.set_key(ord('j')))
         cg.add(var.set_open_hold_number(num))
 
     if CONF_OPEN_FORCE_NUMBER in config:
@@ -128,6 +121,7 @@ async def to_code(config):
             step=1,
         )
         cg.add(num.set_parent(var))
+        cg.add(num.set_key(ord('C')))
         cg.add(var.set_open_force_number(num))
 
     if CONF_CLOSE_FORCE_NUMBER in config:
@@ -138,6 +132,7 @@ async def to_code(config):
             step=1,
         )
         cg.add(num.set_parent(var))
+        cg.add(num.set_key(ord('z')))
         cg.add(var.set_close_force_number(num))
 
     if CONF_CLOSE_END_FORCE_NUMBER in config:
@@ -148,6 +143,7 @@ async def to_code(config):
             step=1,
         )
         cg.add(num.set_parent(var))
+        cg.add(num.set_key(ord('A')))
         cg.add(var.set_close_end_force_number(num))
 
     # --- Text Sensors ---
