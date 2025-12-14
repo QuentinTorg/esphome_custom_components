@@ -119,8 +119,6 @@ class AutoslideOnOffSwitch : public switch_::Switch
 class AutoslideDoor : public Component, public uart::UARTDevice
 {
  public:
-  AutoslideDoor(uart::UARTComponent *parent);
-
   // Component lifecycle methods
   void setup() override;
   void loop() override;
@@ -134,10 +132,10 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   bool send_update_command(char key, int value);
 
   // Utility functions
-  std::string mode_to_string(AutoslideMode mode);
-  std::string motion_state_to_string(AutoslideMotionState state);
-  bool speed_to_bool(AutoslideOpenSpeed speed);
-  bool secure_pet_to_bool(AutoslideSecurePet pet);
+  std::string mode_to_string(AutoslideMode mode) const;
+  std::string motion_state_to_string(AutoslideMotionState state) const;
+  bool speed_to_bool(AutoslideOpenSpeed speed) const;
+  bool secure_pet_to_bool(AutoslideSecurePet pet) const;
 
   // Private helper functions
   void request_all_settings();

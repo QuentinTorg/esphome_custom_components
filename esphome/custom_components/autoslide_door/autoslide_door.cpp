@@ -12,7 +12,7 @@ static const uint32_t COMMAND_TIMEOUT_MS = 15000; // 15 seconds as per the guide
 // --- Helper Functions for String Conversion (from .h) ---
 //
 
-std::string AutoslideDoor::mode_to_string(AutoslideMode mode)
+std::string AutoslideDoor::mode_to_string(AutoslideMode mode) const
 {
   switch (mode)
   {
@@ -29,7 +29,7 @@ std::string AutoslideDoor::mode_to_string(AutoslideMode mode)
   }
 }
 
-std::string AutoslideDoor::motion_state_to_string(AutoslideMotionState state)
+std::string AutoslideDoor::motion_state_to_string(AutoslideMotionState state) const
 {
   switch (state)
   {
@@ -44,24 +44,19 @@ std::string AutoslideDoor::motion_state_to_string(AutoslideMotionState state)
   }
 }
 
-bool AutoslideDoor::speed_to_bool(AutoslideOpenSpeed speed)
+bool AutoslideDoor::speed_to_bool(AutoslideOpenSpeed speed) const
 {
   // OPEN_SPEED_SLOW (1) is 'ON' for the switch, OPEN_SPEED_FAST (0) is 'OFF'
   return speed == OPEN_SPEED_SLOW;
 }
 
-bool AutoslideDoor::secure_pet_to_bool(AutoslideSecurePet pet)
+bool AutoslideDoor::secure_pet_to_bool(AutoslideSecurePet pet) const
 {
   // SECURE_PET_OFF (1) is 'ON' for the switch, SECURE_PET_ON (0) is 'OFF'
   return pet == SECURE_PET_OFF;
 }
 
 // --- AutoslideDoor Component Implementation ---
-
-AutoslideDoor::AutoslideDoor(uart::UARTComponent *parent);
-         : UARTDevice(parent)
-{
-}
 
 void AutoslideDoor::setup()
 {
@@ -76,7 +71,7 @@ void AutoslideDoor::setup()
 float AutoslideDoor::get_setup_priority() const
 {
   // UART setup should happen early
-  return setup_priority::AFTER_UART;
+  return setup_priority::BUS;
 }
 
 void AutoslideDoor::dump_config()
@@ -454,8 +449,7 @@ void AutoslideModeSelect::control(const std::string &value)
     // Send the AT command: key 'a' for mode
     if (parent_->send_update_command('a', mode_value))
     {
-      // Publish the new state immediately for quicker UI feedback, assuming success
-      publish_state(value);
+      ESP_LOGI(TAG, "Sent mode command: %s. (converted to %s)", value, parent_->mode_to_string(mode_value));
     }
   }
   else
@@ -471,8 +465,7 @@ void AutoslideSettingNumber::control(float value)
   // Send the AT command using the stored key
   if (parent_->send_update_command(key_, int_value))
   {
-    // Publish the new state immediately for quicker UI feedback, assuming success
-    publish_state(value);
+    ESP_LOGI(TAG, "Sent setting number: %i", int_value);
   }
 }
 
@@ -495,8 +488,7 @@ void AutoslideOnOffSwitch::write_state(bool value)
     // Send the AT command using the stored key
     if (parent_->send_update_command(key_, protocol_value))
     {
-      // Publish the new state immediately for quicker UI feedback, assuming success
-      publish_state(value);
+      ESP_LOGI(TAG, "Sent on/off state: %s", value ? "on" : "off");
     }
   }
   else
