@@ -89,25 +89,44 @@ void AutoslideDoor::dump_config()
 
 void AutoslideDoor::loop()
 {
+  // 1. Read incoming UART data
   while (available())
   {
-    char byte;
-    read_byte(&byte);
+    uint8_t byte;
+    if (!read_byte(&byte))  // defensive: skip if nothing read
+      break;
 
+    // The Autoslide protocol uses the escape character (0x1B) to terminate commands.
     if (byte == 0x1B)
     {
+      // Complete command received. Process it.
       if (!receive_buffer_.empty())
       {
         handle_incoming_command(receive_buffer_);
       }
+      // Clear buffer for the next command
       receive_buffer_.clear();
+    }
+    else if (byte == '\r' || byte == '\n')
+    {
+      // Ignore stray CR/LF if they ever appear
+      ESP_LOGI(TAG, "Received unexpected whitespace character from serial bus");
     }
     else
     {
-      receive_buffer_ += byte;
+      // Append byte to the receive buffer
+      receive_buffer_ += static_cast<char>(byte);
+
+      // guard against buffer overrun
+      if (receive_buffer_.size() > 256)
+      {
+        ESP_LOGW(TAG, "RX buffer overflow, dropping partial frame");
+        receive_buffer_.clear();
+      }
     }
   }
 
+  // 2. Handle Command Timeout
   if (awaiting_result_from_update_)
   {
     uint32_t now = esphome::millis();
