@@ -407,6 +407,11 @@ void AutoslideDoor::publish_current_state()
     const char *lock_str = (state_.lock_state == STATE_LOCKED) ? "Locked" : "Unlocked";
     lock_state_sensor_->publish_state(lock_str);
   }
+
+  if (busy_sensor_ != nullptr)
+  {
+    busy_sensor_->publish_state(awaiting_result_from_update_);
+  }
 }
 
 // --- ESPHome Configuration Setter Methods ---
@@ -420,6 +425,8 @@ void AutoslideDoor::set_close_force_number(number::Number *number) { close_force
 void AutoslideDoor::set_close_end_force_number(number::Number *number) { close_end_force_number_ = number; }
 void AutoslideDoor::set_motion_state_sensor(text_sensor::TextSensor *sensor) { motion_state_sensor_ = sensor; }
 void AutoslideDoor::set_lock_state_sensor(text_sensor::TextSensor *sensor) { lock_state_sensor_ = sensor; }
+void AutoslideDoor::set_open_button(button::Button *button) { open_button_ = button; }
+void AutoslideDoor::set_busy_sensor(binary_sensor::BinarySensor *sensor) { busy_sensor_ = sensor; }
 
 // --- Custom Entity Control Implementations ---
 
@@ -495,6 +502,11 @@ void AutoslideOnOffSwitch::write_state(bool value)
   {
     ESP_LOGE(TAG, "Unknown switch key '%c' in write_state", key_);
   }
+}
+
+void AutoslideOpenButton::press_action()
+{
+  parent_->trigger_open();
 }
 
 } // namespace autoslide_door

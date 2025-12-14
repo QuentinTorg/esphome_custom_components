@@ -1,5 +1,6 @@
 #pragma once
 
+#include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/button/button.h"
 #include "esphome/components/select/select.h"
 #include "esphome/components/switch/switch.h"
@@ -83,11 +84,6 @@ class AutoslideModeSelect : public select::Select
  public:
   AutoslideModeSelect(AutoslideDoor *parent) : parent_(parent) {}
   void control(const std::string &value) override;
-  // Options are defined in YAML
-  std::vector<std::string> get_options() override
-  {
-    return {"Auto", "Stack", "Lock", "Pet"};
-  }
  protected:
   AutoslideDoor *parent_;
 };
@@ -112,6 +108,17 @@ class AutoslideOnOffSwitch : public switch_::Switch
  protected:
   AutoslideDoor *parent_;
   char key_;
+};
+
+class AutoslideOpenButton : public button::Button
+{
+ public:
+  explicit AutoslideOpenButton(AutoslideDoor *parent) : parent_(parent) {}
+
+ protected:
+  void press_action() override;
+
+  AutoslideDoor *parent_;
 };
 
 // --- Main Component Class ---
@@ -156,6 +163,8 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   void set_close_end_force_number(number::Number *number);
   void set_motion_state_sensor(text_sensor::TextSensor *sensor);
   void set_lock_state_sensor(text_sensor::TextSensor *sensor);
+  void set_open_button(button::Button *button);
+  void set_busy_sensor(binary_sensor::BinarySensor *sensor);
 
  protected:
   AutoslideState state_{};
@@ -173,6 +182,8 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   number::Number *close_end_force_number_{nullptr};
   text_sensor::TextSensor *motion_state_sensor_{nullptr};
   text_sensor::TextSensor *lock_state_sensor_{nullptr};
+  button::Button *open_button_{nullptr};
+  binary_sensor::BinarySensor *busy_sensor_{nullptr};
 };
 
 } // namespace autoslide_door
