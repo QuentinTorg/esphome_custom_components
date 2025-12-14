@@ -1,362 +1,508 @@
 #include "autoslide_door.h"
 #include "esphome/core/log.h"
-#include "esphome/core/helpers.h"
+#include "esphome/core/application.h"
+#include <sstream>
 
 namespace esphome {
 namespace autoslide_door {
 
-// Helper function to convert a float setting value to a zero-padded string (e.g., 0 -> "00", 15 -> "15")
-// Used for the Open Hold Time ('j') command which expects two digits.
-std::string format_setting_value(float value) {
-  int val = static_cast<int>(value);
-  if (val < 10) {
-    return "0" + to_string(val);
+static const char *const TAG = "autoslide_door";
+static const uint32_t COMMAND_TIMEOUT_MS = 15000; // 15 seconds as per the guide
+
+// --- Helper Functions for String Conversion (from .h) ---
+//
+
+std::string AutoslideDoor::mode_to_string(AutoslideMode mode)
+{
+  switch (mode)
+  {
+    case MODE_AUTO:
+      return "Auto";
+    case MODE_STACK:
+      return "Stack";
+    case MODE_LOCK:
+      return "Lock";
+    case MODE_PET:
+      return "Pet";
+    default:
+      return "Unknown";
   }
-  return to_string(val);
 }
 
-// ====================================================================
-// --- Main AutoslideDoor Component Implementation ---
-// ====================================================================
+std::string AutoslideDoor::motion_state_to_string(AutoslideMotionState state)
+{
+  switch (state)
+  {
+    case MOTION_STOPPED:
+      return "Stopped";
+    case MOTION_OPENING:
+      return "Opening";
+    case MOTION_CLOSING:
+      return "Closing";
+    default:
+      return "Unknown";
+  }
+}
 
-void AutoslideDoor::send_command(const std::string &command, uint32_t wait_ms) {
-  if (this->waiting_for_result_) {
-    ESP_LOGW(TAG, "Skipping command '%s', already waiting for previous result.", command.c_str());
+bool AutoslideDoor::speed_to_bool(AutoslideOpenSpeed speed)
+{
+  // OPEN_SPEED_SLOW (1) is 'ON' for the switch, OPEN_SPEED_FAST (0) is 'OFF'
+  return speed == OPEN_SPEED_SLOW;
+}
+
+bool AutoslideDoor::secure_pet_to_bool(AutoslideSecurePet pet)
+{
+  // SECURE_PET_OFF (1) is 'ON' for the switch, SECURE_PET_ON (0) is 'OFF'
+  return pet == SECURE_PET_OFF;
+}
+
+// --- AutoslideDoor Component Implementation ---
+
+AutoslideDoor::AutoslideDoor(uart::UARTComponent *parent);
+         : UARTDevice(parent)
+{
+}
+
+void AutoslideDoor::setup()
+{
+  ESP_LOGCONFIG(TAG, "Setting up Autoslide Door Component...");
+  // Initialize state to default or unknown values
+  state_ = {};
+
+  // Request all current settings from the door right away
+  request_all_settings();
+}
+
+float AutoslideDoor::get_setup_priority() const
+{
+  // UART setup should happen early
+  return setup_priority::AFTER_UART;
+}
+
+void AutoslideDoor::dump_config()
+{
+    ESP_LOGCONFIG(TAG, "autoslide component");
+    ESP_LOGCONFIG(TAG, "  awaiting_result_from_update: %s", awaiting_result_from_update_ ? "true" : "false");
+    ESP_LOGCONFIG(TAG, "  last_command_sent_time_ms: %i", last_command_sent_time_ms_);
+
+    ESP_LOGCONFIG(TAG, "  now:                       %i", esphome::millis());
+    ESP_LOGCONFIG(TAG, "  state:");
+    ESP_LOGCONFIG(TAG, "    mode: %s", mode_to_string(state_.door_mode));
+    ESP_LOGCONFIG(TAG, "    open_speed %s", state_.open_speed == OPEN_SPEED_FAST ? "fast" : "slow");
+    ESP_LOGCONFIG(TAG, "    secure_pet: %s", state_.secure_pet == SECURE_PET_ON ? "on" : "off");
+    ESP_LOGCONFIG(TAG, "    open_hold_duration: %i", state_.open_hold_duration);
+    ESP_LOGCONFIG(TAG, "    open_force: %i", state_.open_force);
+    ESP_LOGCONFIG(TAG, "    close_force: %i", state_.close_force);
+    ESP_LOGCONFIG(TAG, "    close_end_force: %i", state_.close_end_force);
+    ESP_LOGCONFIG(TAG, "    motion_state: %s", motion_state_to_string(state_.motion_state));
+    ESP_LOGCONFIG(TAG, "    lock_state: %s", state_.lock_state == STATE_LOCKED ? "locked" : "unlocked");
+    ESP_LOGCONFIG(TAG, "    motion_trigger: %i", state_.motion_trigger);
+}
+
+void AutoslideDoor::loop()
+{
+  // 1. Read incoming UART data
+  while (available())
+  {
+    char byte;
+    read_byte(&byte);
+
+    // The Autoslide protocol uses the escape character (0x1B or '\e') to terminate commands.
+    if (byte == 0x1B)
+    {
+      // Complete command received. Process it.
+      if (!receive_buffer_.empty())
+      {
+        handle_incoming_command(receive_buffer_);
+      }
+      // Clear buffer for the next command
+      receive_buffer_.clear();
+    }
+    else
+    {
+      // Append byte to the receive buffer
+      receive_buffer_ += byte;
+    }
+  }
+
+  // 2. Handle Command Timeout
+  // If we sent a command but haven't received a result in 15 seconds, we assume it failed
+  // and clear the flag to allow new commands. This uses rollover-safe arithmetic.
+  if (awaiting_result_from_update_)
+  {
+    uint32_t now = esphome::millis();
+    if (now - last_command_sent_time_ms_ > COMMAND_TIMEOUT_MS)
+    {
+      ESP_LOGE(TAG, "Command timeout! Did not receive AT+RESULT within %u ms.", COMMAND_TIMEOUT_MS);
+      awaiting_result_from_update_ = false;
+    }
+  }
+}
+
+void AutoslideDoor::trigger_open()
+{
+  // Key 'b' is for trigger. Value 0 is TRIGGER_MASTER (the main open command).
+  // This command must follow the AT+UPDATE protocol to ensure command sequencing.
+  if (send_update_command('b', TRIGGER_MASTER))
+  {
+    ESP_LOGD(TAG, "Sent Master Open Trigger (b:0)");
+  }
+}
+
+// --- Utility Functions ---
+
+bool AutoslideDoor::send_update_command(char key, int value)
+{
+  // Check if we are currently waiting for a result from a previous command
+  if (awaiting_result_from_update_)
+  {
+    ESP_LOGW(TAG, "Cannot send command ('%c':%d). Waiting for AT+RESULT from previous command.", key, value);
+    return false;
+  }
+
+  // Format the command string: AT+UPDATE,key:value\e
+  std::string command = "AT+UPDATE,";
+  command += key;
+  command += ":";
+  if (key == 'j' and value >= 0 and value <= 9)
+  {
+      // for j value only output must be 2 digits
+      command += '0';
+  }
+  command += std::to_string(value);
+  command += (char) 0x1B; // Escape character
+
+  ESP_LOGD(TAG, "Sending command: %s", command.c_str());
+
+  // Write to UART
+  write_str(command.c_str());
+
+  // Set flags to wait for the reply
+  awaiting_result_from_update_ = true;
+  last_command_sent_time_ms_ = esphome::millis();
+  return true;
+}
+
+void AutoslideDoor::send_upsend_reply()
+{
+  // Required reply after receiving AT+UPSEND: AT+REPLY,r:1\e
+  const std::string command = "AT+REPLY,r:1" + std::string(1, 0x1B);
+  ESP_LOGD(TAG, "Sending UPSEND Reply: %s", command.c_str());
+  write_str(command.c_str());
+}
+
+void AutoslideDoor::request_all_settings()
+{
+  // Key 'd' with value 0 requests all current settings: AT+UPDATE,d:0\e
+  if (send_update_command('d', 0))
+  {
+    ESP_LOGI(TAG, "Requesting initial door settings (d:0)...");
+  }
+}
+
+void AutoslideDoor::handle_incoming_command(const std::string &command)
+{
+  ESP_LOGV(TAG, "Received raw command: %s", command.c_str());
+
+  // Check for the mandatory "AT+" prefix
+  if (command.length() < 3 || command.substr(0, 3) != "AT+")
+  {
+    ESP_LOGE(TAG, "Invalid AT command prefix: %s", command.c_str());
     return;
   }
 
-  // Format the command: AT+UPDATE,<command>\e
-  std::string full_command = "AT+UPDATE," + command + (char) END_CHAR;
+  // Find the command type (e.g., RESULT, UPSEND)
+  size_t comma_pos = command.find(',');
+  std::string command_type;
+  std::string payload;
 
-  ESP_LOGD(TAG, "Sending command: %s", full_command.c_str());
-  this->write_str(full_command.c_str());
+  if (comma_pos == std::string::npos)
+  {
+    // Command with no payload (e.g., AT+UPDATE without comma, unlikely but check basic structure)
+    command_type = command.substr(3);
+  }
+  else
+  {
+    // Command with payload: AT+COMMAND,payload
+    command_type = command.substr(3, comma_pos - 3);
+    payload = command.substr(comma_pos + 1);
+  }
 
-  // Set state to indicate we are waiting for a reply
-  this->last_command_time_ = millis();
-  this->waiting_for_result_ = true;
+  if (command_type == "RESULT")
+  {
+    handle_result_command(payload);
+  }
+  else if (command_type == "UPSEND")
+  {
+    handle_upsend_command(payload);
+  }
+  else if (command_type == "REPLY")
+  {
+    // The door is responding to our AT+REPLY. Nothing to do here.
+    ESP_LOGV(TAG, "Received AT+REPLY from Autoslide. Acknowledged.");
+  }
+  else
+  {
+    ESP_LOGW(TAG, "Unknown AT command type received: %s", command_type.c_str());
+  }
 }
 
-void AutoslideDoor::request_status() {
-  // Command to request current settings: AT+UPDATE,d:0\e
-  this->send_command("d:0", 100);
-}
+void AutoslideDoor::handle_result_command(const std::string &payload)
+{
+  // AT+RESULT is the response to AT+UPDATE. It may contain r:1/r:0 and/or updated settings.
+  ESP_LOGD(TAG, "Received AT+RESULT with payload: %s", payload.c_str());
 
-// Utility function to split a string into key-value pairs (e.g., "a:0,e:1" -> {"a":"0", "e":"1"})
-std::map<std::string, std::string> AutoslideDoor::parse_key_values(const std::string &payload) {
-  std::map<std::string, std::string> key_values;
+  // Processing the AT+RESULT means the update cycle is complete.
+  awaiting_result_from_update_ = false;
 
-  // Split the payload string by comma (,)
-  std::vector<std::string> parts = split(payload, ',');
+  // Split payload by comma to get individual key-value pairs
+  std::stringstream ss(payload);
+  std::string key_value_pair;
 
-  for (const auto &part : parts) {
-    // Split each part by colon (:)
-    size_t colon_pos = part.find(':');
-    if (colon_pos != std::string::npos) {
-      std::string key = part.substr(0, colon_pos);
-      std::string value = part.substr(colon_pos + 1);
-      key_values[key] = value;
+  while (std::getline(ss, key_value_pair, ','))
+  {
+    // Each pair is key:value (e.g., "a:0" or "r:1")
+    size_t colon_pos = key_value_pair.find(':');
+    if (colon_pos == std::string::npos || key_value_pair.length() < 3)
+    {
+      ESP_LOGW(TAG, "Malformed key-value pair in AT+RESULT: %s", key_value_pair.c_str());
+      continue;
     }
-  }
-  return key_values;
-}
 
+    char key = key_value_pair[0];
+    std::string value_str = key_value_pair.substr(colon_pos + 1);
+    int value = atoi(value_str.c_str());
 
-void AutoslideDoor::parse_status(const std::string &payload) {
-  // The Autoslide can send:
-  // 1. AT+RESULT,r:1 (Success reply to AT+UPDATE)
-  // 2. AT+RESULT,a:0,e:1,... (Full status reply to AT+UPDATE,d:0\e)
-  // 3. AT+UPSEND,m:2,c:1,... (Unprompted status update)
-
-  // Only stop waiting if the response is AT+RESULT
-  if (payload.rfind("RESULT,", 0) == 0) {
-      this->waiting_for_result_ = false;
-  }
-
-  // Find the command type and content
-  size_t comma_pos = payload.find(',');
-  if (comma_pos == std::string::npos) {
-    ESP_LOGW(TAG, "Invalid Autoslide response format: %s", payload.c_str());
-    return;
-  }
-
-  std::string command_type = payload.substr(0, comma_pos);
-  std::string content = payload.substr(comma_pos + 1);
-
-  ESP_LOGD(TAG, "Received payload content: %s", content.c_str());
-
-  // Check if it's a simple success reply "r:1"
-  if (content == "r:1" || content == "r:0") {
-      ESP_LOGI(TAG, "Received command result: %s", content.c_str());
-      return;
-  }
-
-  // Parse key-value settings from the content (e.g., "a:0,e:1,...")
-  std::map<std::string, std::string> settings = this->parse_key_values(content);
-
-  // --- Update All Entities ---
-
-  // Key 'a': Door Mode (Select)
-  if (settings.count("a") && this->mode_select_ != nullptr) {
-    int mode_value = safe_str_to_int(settings.at("a")).value_or(-1);
-    if (mode_value != -1) {
-      for (const auto &pair : this->mode_select_->value_map_) {
-        if (pair.second == mode_value) {
-          if (this->mode_select_->get_state() != pair.first) {
-            this->mode_select_->publish_state(pair.first);
-            ESP_LOGV(TAG, "Updated Door Mode (a) to: %s", pair.first.c_str());
-          }
-          break;
-        }
+    if (key == 'r')
+    {
+      // Status result (r:1 = success, r:0 = fail)
+      if (value == 1)
+      {
+        ESP_LOGI(TAG, "Command acknowledged successfully.");
+      }
+      else
+      {
+        ESP_LOGE(TAG, "Command failed to execute (r:0).");
       }
     }
-  }
-
-  // Key 'e': Open Speed (Switch)
-  if (settings.count("e") && this->open_speed_switch_ != nullptr) {
-    bool state = settings.at("e") == "1";
-    if (this->open_speed_switch_->state != state) {
-      this->open_speed_switch_->publish_state(state);
-      ESP_LOGV(TAG, "Updated Open Speed (e) to: %s", state ? "ON" : "OFF");
+    else
+    {
+      // This is a setting or state update. Update the internal state.
+      update_state(key, value);
     }
   }
-
-  // Key 'g': Secure Pet Mode (Switch)
-  if (settings.count("g") && this->secure_pet_switch_ != nullptr) {
-    bool state = settings.at("g") == "1";
-    if (this->secure_pet_switch_->state != state) {
-      this->secure_pet_switch_->publish_state(state);
-      ESP_LOGV(TAG, "Updated Secure Pet Mode (g) to: %s", state ? "ON" : "OFF");
-    }
-  }
-
-  // Key 'j': Open Hold Duration (Number)
-  if (settings.count("j") && this->open_hold_number_ != nullptr) {
-    // Settings for 'j' come as a zero-padded string (e.g., "05"), convert to int
-    float value = safe_str_to_int(settings.at("j")).value_or(0);
-    if (this->open_hold_number_->state != value) {
-      this->open_hold_number_->publish_state(value);
-      ESP_LOGV(TAG, "Updated Open Hold Duration (j) to: %.0f", value);
-    }
-  }
-
-  // Key 'C': Open Force (Number)
-  if (settings.count("C") && this->open_open_force_number_ != nullptr) {
-    float value = safe_str_to_int(settings.at("C")).value_or(0);
-    if (this->open_open_force_number_->state != value) {
-      this->open_open_force_number_->publish_state(value);
-      ESP_LOGV(TAG, "Updated Open Force (C) to: %.0f", value);
-    }
-  }
-
-  // Key 'Z': Close Force (Number)
-  if (settings.count("Z") && this->close_force_number_ != nullptr) {
-    float value = safe_str_to_int(settings.at("Z")).value_or(0);
-    if (this->close_force_number_->state != value) {
-      this->close_force_number_->publish_state(value);
-      ESP_LOGV(TAG, "Updated Close Force (Z) to: %.0f", value);
-    }
-  }
-
-  // Key 'A': Close End Force (Number)
-  if (settings.count("A") && this->close_end_force_number_ != nullptr) {
-    float value = safe_str_to_int(settings.at("A")).value_or(0);
-    if (this->close_end_force_number_->state != value) {
-      this->close_end_force_number_->publish_state(value);
-      ESP_LOGV(TAG, "Updated Close End Force (A) to: %.0f", value);
-    }
-  }
-
-  // --- Update Read-only Text Sensors ---
-
-  // Key 'm': Motion State (Text Sensor)
-  if (settings.count("m") && this->motion_state_sensor_ != nullptr) {
-    std::string motion_state;
-    // m:2 means Motion Detected, m:0 means No Motion (inferred)
-    if (settings.at("m") == "2") {
-      motion_state = "Motion Detected";
-    } else if (settings.at("m") == "0") {
-      motion_state = "No Motion";
-    } else {
-      motion_state = "Unknown (" + settings.at("m") + ")";
-    }
-    if (this->motion_state_sensor_->get_state() != motion_state) {
-      this->motion_state_sensor_->publish_state(motion_state);
-      ESP_LOGV(TAG, "Updated Motion State (m) to: %s", motion_state.c_str());
-    }
-  }
-
-  // Key 'c': Lock State (Text Sensor)
-  if (settings.count("c") && this->lock_state_sensor_ != nullptr) {
-    std::string lock_state;
-    // c:1 means Locked, c:0 means Unlocked
-    if (settings.at("c") == "1") {
-      lock_state = "Locked";
-    } else if (settings.at("c") == "0") {
-      lock_state = "Unlocked";
-    } else {
-      lock_state = "Unknown (" + settings.at("c") + ")";
-    }
-    if (this->lock_state_sensor_->get_state() != lock_state) {
-      this->lock_state_sensor_->publish_state(lock_state);
-      ESP_LOGV(TAG, "Updated Lock State (c) to: %s", lock_state.c_str());
-    }
-  }
+  // Publish all updated entities to ESPHome only once after processing the full response
+  publish_current_state();
 }
 
-// --- ESPHome Component Overrides ---
+void AutoslideDoor::handle_upsend_command(const std::string &payload)
+{
+  // AT+UPSEND is an unsolicited message with current status (motion, lock, etc.)
+  ESP_LOGD(TAG, "Received AT+UPSEND (Status Update) with payload: %s", payload.c_str());
 
-void AutoslideDoor::setup() {
-  // Set all entities to point back to this parent component
-  if (this->trigger_button_) this->trigger_button_->set_parent(this);
-  if (this->mode_select_) this->mode_select_->set_parent(this);
-  if (this->open_speed_switch_) this->open_speed_switch_->set_parent(this);
-  if (this->secure_pet_switch_) this->secure_pet_switch_->set_parent(this);
-  if (this->open_hold_number_) this->open_hold_number_->set_parent(this);
-  if (this->open_open_force_number_) this->open_open_force_number_->set_parent(this);
-  if (this->close_force_number_) this->close_force_number_->set_parent(this);
-  if (this->close_end_force_number_) this->close_end_force_number_->set_parent(this);
-  if (this->motion_state_sensor_) this->motion_state_sensor_->set_parent(this);
-  if (this->lock_state_sensor_) this->lock_state_sensor_->set_parent(this);
+  // We must reply immediately to acknowledge the status update.
+  send_upsend_reply();
 
-  ESP_LOGCONFIG(TAG, "Autoslide Door Component initialized.");
-  // Request initial status immediately after setup
-  this->request_status();
+  // Split payload and process key-value pairs
+  std::stringstream ss(payload);
+  std::string key_value_pair;
+
+  while (std::getline(ss, key_value_pair, ','))
+  {
+    size_t colon_pos = key_value_pair.find(':');
+    if (colon_pos == std::string::npos || key_value_pair.length() < 3)
+    {
+      ESP_LOGW(TAG, "Malformed key-value pair in AT+UPSEND: %s", key_value_pair.c_str());
+      continue;
+    }
+
+    char key = key_value_pair[0];
+    std::string value_str = key_value_pair.substr(colon_pos + 1);
+    int value = atoi(value_str.c_str());
+
+    // Update the internal state for each key/value pair
+    update_state(key, value);
+  }
+  // Publish all updated entities to ESPHome only once after processing the full response
+  publish_current_state();
 }
 
-void AutoslideDoor::update() {
-  // This is called periodically based on the 'update_interval' in YAML
-  // Use this to proactively request the door's current status if no update has been received recently
-  this->request_status();
-}
+void AutoslideDoor::update_state(char key, int value)
+{
+  // Process and update internal state based on the key
+  switch (key)
+  {
+    // Writable Settings
+    case 'a': state_.door_mode = (AutoslideMode) value; break;
+    case 'e': state_.open_speed = (AutoslideOpenSpeed) value; break;
+    case 'g': state_.secure_pet = (AutoslideSecurePet) value; break;
+    case 'j': state_.open_hold_duration = (uint8_t) value; break;
+    case 'C': state_.open_force = (uint8_t) value; break;
+    case 'z': state_.close_force = (uint8_t) value; break;
+    case 'A': state_.close_end_force = (uint8_t) value; break;
 
-void AutoslideDoor::loop() {
-  // Check for incoming data from the UART bus
-  while (this->available()) {
-    uint8_t byte;
-    this->read_byte(&byte);
-
-    if (byte == END_CHAR) {
-      // End of command detected
-      if (this->receive_buffer_.length() > 0) {
-        // Full command is AT+<TYPE>,<PAYLOAD> (without the trailing \e)
-        // We expect the beginning "AT+" followed by the command type.
-        if (this->receive_buffer_.rfind("AT+", 0) == 0) {
-          // Remove "AT+" prefix
-          std::string payload = this->receive_buffer_.substr(3);
-          this->parse_status(payload);
-          this->last_status_update_time_ = millis();
-        } else {
-          ESP_LOGW(TAG, "Received malformed start of command: %s", this->receive_buffer_.c_str());
-        }
+    // Read-only Status
+    case 'm': state_.motion_state = (AutoslideMotionState) value; break;
+    case 'c': state_.lock_state = (AutoslideLockedState) value; break;
+    case 'n': state_.motion_trigger = (uint8_t) value; break; // Not exposed as an entity, just log
+    default:
+      if (key != 'r')
+      {
+        ESP_LOGW(TAG, "Received unknown key '%c' with value %d", key, value);
       }
-      // Reset buffer regardless of success
-      this->receive_buffer_.clear();
-    } else {
-      // Append byte to the buffer
-      this->receive_buffer_ += (char) byte;
+      break;
+  }
+}
+
+void AutoslideDoor::publish_current_state()
+{
+  ESP_LOGV(TAG, "Publishing current state to ESPHome entities...");
+
+  // Mode Select
+  if (mode_select_ != nullptr)
+  {
+    mode_select_->publish_state(mode_to_string(state_.door_mode));
+  }
+  // Open Speed Switch
+  if (open_speed_switch_ != nullptr)
+  {
+    open_speed_switch_->publish_state(speed_to_bool(state_.open_speed));
+  }
+  // Secure Pet Switch
+  if (secure_pet_switch_ != nullptr)
+  {
+    secure_pet_switch_->publish_state(secure_pet_to_bool(state_.secure_pet));
+  }
+  // Open Hold Number
+  if (open_hold_number_ != nullptr)
+  {
+    open_hold_number_->publish_state(state_.open_hold_duration);
+  }
+  // Open Force Number
+  if (open_force_number_ != nullptr)
+  {
+    open_force_number_->publish_state(state_.open_force);
+  }
+  // Close Force Number
+  if (close_force_number_ != nullptr)
+  {
+    close_force_number_->publish_state(state_.close_force);
+  }
+  // Close End Force Number
+  if (close_end_force_number_ != nullptr)
+  {
+    close_end_force_number_->publish_state(state_.close_end_force);
+  }
+  // Motion State Text Sensor
+  if (motion_state_sensor_ != nullptr)
+  {
+    const char *motion_str;
+    switch (state_.motion_state)
+    {
+      case MOTION_STOPPED: motion_str = "Stopped"; break;
+      case MOTION_OPENING: motion_str = "Opening"; break;
+      case MOTION_CLOSING: motion_str = "Closing"; break;
+      default: motion_str = "Unknown"; break;
+    }
+    motion_state_sensor_->publish_state(motion_str);
+  }
+  // Lock State Text Sensor
+  if (lock_state_sensor_ != nullptr)
+  {
+    const char *lock_str = (state_.lock_state == STATE_LOCKED) ? "Locked" : "Unlocked";
+    lock_state_sensor_->publish_state(lock_str);
+  }
+}
+
+// --- ESPHome Configuration Setter Methods ---
+
+void AutoslideDoor::set_mode_select(select::Select *select) { mode_select_ = select; }
+void AutoslideDoor::set_open_speed_switch(switch_::Switch *sw) { open_speed_switch_ = sw; }
+void AutoslideDoor::set_secure_pet_switch(switch_::Switch *sw) { secure_pet_switch_ = sw; }
+void AutoslideDoor::set_open_hold_number(number::Number *number) { open_hold_number_ = number; }
+void AutoslideDoor::set_open_force_number(number::Number *number) { open_force_number_ = number; }
+void AutoslideDoor::set_close_force_number(number::Number *number) { close_force_number_ = number; }
+void AutoslideDoor::set_close_end_force_number(number::Number *number) { close_end_force_number_ = number; }
+void AutoslideDoor::set_motion_state_sensor(text_sensor::TextSensor *sensor) { motion_state_sensor_ = sensor; }
+void AutoslideDoor::set_lock_state_sensor(text_sensor::TextSensor *sensor) { lock_state_sensor_ = sensor; }
+
+// --- Custom Entity Control Implementations ---
+
+void AutoslideModeSelect::control(const std::string &value)
+{
+  int mode_value = -1;
+  // Convert mode string back to its corresponding integer value
+  if (value == "Auto")
+  {
+    mode_value = MODE_AUTO;
+  }
+  else if (value == "Stack")
+  {
+    mode_value = MODE_STACK;
+  }
+  else if (value == "Lock")
+  {
+    mode_value = MODE_LOCK;
+  }
+  else if (value == "Pet")
+  {
+    mode_value = MODE_PET;
+  }
+
+  if (mode_value != -1)
+  {
+    // Send the AT command: key 'a' for mode
+    if (parent_->send_update_command('a', mode_value))
+    {
+      // Publish the new state immediately for quicker UI feedback, assuming success
+      publish_state(value);
     }
   }
-
-  // Timeout check for commands sent
-  // If we sent a command and haven't received a result after 500ms, assume failure.
-  if (this->waiting_for_result_ && (millis() - this->last_command_time_ > 500)) {
-    ESP_LOGW(TAG, "Command timeout. No AT+RESULT received.");
-    this->waiting_for_result_ = false;
+  else
+  {
+    ESP_LOGE(TAG, "Invalid door mode selected: %s", value.c_str());
   }
 }
 
-// ====================================================================
-// --- Entity Command Implementations (Called by entity callbacks) ---
-// ====================================================================
+void AutoslideSettingNumber::control(float value)
+{
+  int int_value = (int) roundf(value); // Ensure it's treated as an integer
 
-// Button (Master Trigger: b:0)
-void AutoslideDoor::trigger_master() {
-  this->send_command("b:0");
-}
-
-// Select (Door Mode: a:<mode>)
-void AutoslideDoor::set_door_mode(int mode) {
-  this->send_command("a:" + to_string(mode));
-}
-
-// Switch (Open Speed: e:1/0)
-void AutoslideDoor::set_open_speed(bool state) {
-  this->send_command("e:" + to_string(state ? 1 : 0));
-}
-
-// Switch (Secure Pet Mode: g:1/0)
-void AutoslideDoor::set_secure_pet(bool state) {
-  this->send_command("g:" + to_string(state ? 1 : 0));
-}
-
-// Number (Open Hold Time: j:<time>)
-void AutoslideDoor::set_open_hold_time(float value) {
-  this->send_command("j:" + format_setting_value(value));
-}
-
-// Number (Open Force: C:<force>)
-void AutoslideDoor::set_open_force(float value) {
-  this->send_command("C:" + to_string(static_cast<int>(value)));
-}
-
-// Number (Close Force: Z:<force>)
-void AutoslideDoor::set_close_force(float value) {
-  this->send_command("Z:" + to_string(static_cast<int>(value)));
-}
-
-// Number (Close End Force: A:<force>)
-void AutoslideDoor::set_close_end_force(float value) {
-  this->send_command("A:" + to_string(static_cast<int>(value)));
-}
-
-// ====================================================================
-// --- Entity Callback Overrides (Called by Home Assistant / API) ---
-// ====================================================================
-
-// Button
-void AutoslideTriggerButton::press_action() {
-  this->parent_->trigger_master();
-}
-
-// Select
-void AutoslideModeSelect::control(const std::string &value) {
-  if (this->value_map_.count(value)) {
-    this->parent_->set_door_mode(this->value_map_.at(value));
-    // Publish pending state while waiting for confirmation from Autoslide
-    this->publish_state(value);
+  // Send the AT command using the stored key
+  if (parent_->send_update_command(key_, int_value))
+  {
+    // Publish the new state immediately for quicker UI feedback, assuming success
+    publish_state(value);
   }
 }
 
-// Switch
-void AutoslideOpenSpeedSwitch::write_state(bool state) {
-  this->parent_->set_open_speed(state);
-  this->publish_state(state);
-}
+void AutoslideOnOffSwitch::write_state(bool value)
+{
+  int protocol_value = -1;
 
-void AutoslideSecurePetSwitch::write_state(bool state) {
-  this->parent_->set_secure_pet(state);
-  this->publish_state(state);
-}
+  // Determine the protocol value based on the key, as 'ON' (true) doesn't always mean '1'
+  if (key_ == 'e')
+  { // Open Speed: ON(true) = SLOW(1), OFF(false) = FAST(0)
+    protocol_value = value ? OPEN_SPEED_SLOW : OPEN_SPEED_FAST;
+  }
+  else if (key_ == 'g')
+  { // Secure Pet: ON(true) = OFF(1), OFF(false) = ON(0)
+    protocol_value = value ? SECURE_PET_OFF : SECURE_PET_ON;
+  }
 
-// Number
-void AutoslideOpenHoldNumber::control(float value) {
-  this->parent_->set_open_hold_time(value);
-  this->publish_state(value);
-}
-
-void AutoslideOpenForceNumber::control(float value) {
-  this->parent_->set_open_force(value);
-  this->publish_state(value);
-}
-
-void AutoslideCloseForceNumber::control(float value) {
-  this->parent_->set_close_force(value);
-  this->publish_state(value);
-}
-
-void AutoslideCloseEndForceNumber::control(float value) {
-  this->parent_->set_close_end_force(value);
-  this->publish_state(value);
+  if (protocol_value != -1)
+  {
+    // Send the AT command using the stored key
+    if (parent_->send_update_command(key_, protocol_value))
+    {
+      // Publish the new state immediately for quicker UI feedback, assuming success
+      publish_state(value);
+    }
+  }
+  else
+  {
+    ESP_LOGE(TAG, "Unknown switch key '%c' in write_state", key_);
+  }
 }
 
 } // namespace autoslide_door

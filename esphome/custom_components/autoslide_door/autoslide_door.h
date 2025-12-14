@@ -1,138 +1,180 @@
 #pragma once
 
-#include "esphome/core/component.h"
-#include "esphome/components/uart/uart.h"
 #include "esphome/components/button/button.h"
 #include "esphome/components/select/select.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/number/number.h"
 #include "esphome/components/text_sensor/text_sensor.h"
-#include "esphome/core/log.h"
-#include <vector>
+#include "esphome/components/uart/uart.h"
+#include "esphome/core/component.h"
 
-namespace esphome {
-namespace autoslide_door {
+namespace esphome
+{
+namespace autoslide_door
+{
 
-static const char *const TAG = "autoslide_door";
-static const uint8_t END_CHAR = 0x1B; // Escape character (\e)
+// --- Constants & Enums based on Autoslide Programmer's Guide ---
 
-// --- Custom Entity Classes ---
+// Key 'b'
+static const int TRIGGER_MASTER = 0;
 
-// Base class for all controllable entities to access the parent component
-class AutoslideDoorComponentBase {
- public:
-  void set_parent(AutoslideDoor *parent) { this->parent_ = parent; }
-
- protected:
-  AutoslideDoor *parent_{nullptr};
+// Key 'a': Door Mode
+enum AutoslideMode
+{
+  MODE_AUTO = 0,
+  MODE_STACK = 1,
+  MODE_LOCK = 2,
+  MODE_PET = 3,
 };
 
-class AutoslideTriggerButton : public button::Button, public AutoslideDoorComponentBase {
- public:
-  void press_action() override;
+// Key 'e': Open Speed (Slow/Fast)
+enum AutoslideOpenSpeed
+{
+  OPEN_SPEED_FAST = 0, // Maps to Switch OFF
+  OPEN_SPEED_SLOW = 1, // Maps to Switch ON (Default behavior)
 };
 
-class AutoslideModeSelect : public select::Select, public AutoslideDoorComponentBase {
+// Key 'g': Secure Pet Mode (Pet On/Pet Off)
+enum AutoslideSecurePet
+{
+  SECURE_PET_ON = 0,  // Maps to Switch OFF
+  SECURE_PET_OFF = 1, // Maps to Switch ON (Default behavior)
+};
+
+// Key 'm': Motion State (Read-only)
+enum AutoslideMotionState
+{
+  MOTION_STOPPED = 0,
+  MOTION_OPENING = 1,
+  MOTION_CLOSING = 2,
+};
+
+// Key 'c': Lock State (Read-only)
+enum AutoslideLockedState
+{
+  STATE_UNLOCKED = 0,
+  STATE_LOCKED = 1,
+};
+
+// --- State Struct ---
+
+struct AutoslideState
+{
+  AutoslideMode door_mode{MODE_LOCK};
+  AutoslideOpenSpeed open_speed{OPEN_SPEED_FAST};
+  AutoslideSecurePet secure_pet{SECURE_PET_ON};
+  uint8_t open_hold_duration{0}; // Key 'j' (0-25)
+  uint8_t open_force{0};         // Key 'C' (0-7)
+  uint8_t close_force{0};        // Key 'z' (0-7)
+  uint8_t close_end_force{0};    // Key 'A' (0-7)
+  AutoslideMotionState motion_state{MOTION_STOPPED};
+  AutoslideLockedState lock_state{STATE_LOCKED};
+  uint8_t motion_trigger{0};     // Key 'n' (Raw trigger value)
+};
+
+// Forward declaration of the main component class
+class AutoslideDoor;
+
+// --- Custom Control Implementations ---
+
+// Custom Select class for Door Mode ('a')
+class AutoslideModeSelect : public select::Select
+{
  public:
-  void set_value_map(const std::map<std::string, int> &value_map) { this->value_map_ = value_map; }
+  AutoslideModeSelect(AutoslideDoor *parent) : parent_(parent) {}
   void control(const std::string &value) override;
-
+  // Options are defined in YAML
+  std::vector<std::string> get_options() override
+  {
+    return {"Auto", "Stack", "Lock", "Pet"};
+  }
  protected:
-  std::map<std::string, int> value_map_;
+  AutoslideDoor *parent_;
 };
 
-class AutoslideOpenSpeedSwitch : public switch_::Switch, public AutoslideDoorComponentBase {
+// Custom Number class for Open Hold, Forces ('j', 'C', 'Z', 'A')
+class AutoslideSettingNumber : public number::Number
+{
  public:
-  void write_state(bool state) override;
-};
-
-class AutoslideSecurePetSwitch : public switch_::Switch, public AutoslideDoorComponentBase {
- public:
-  void write_state(bool state) override;
-};
-
-class AutoslideOpenHoldNumber : public number::Number, public AutoslideDoorComponentBase {
- public:
+  AutoslideSettingNumber(AutoslideDoor *parent, char key) : parent_(parent), key_(key) {}
   void control(float value) override;
+ protected:
+  AutoslideDoor *parent_;
+  char key_;
 };
 
-class AutoslideOpenForceNumber : public number::Number, public AutoslideDoorComponentBase {
+// Custom Switch class for Open Speed and Secure Pet ('e', 'g')
+class AutoslideOnOffSwitch : public switch_::Switch
+{
  public:
-  void control(float value) override;
+  AutoslideOnOffSwitch(AutoslideDoor *parent, char key) : parent_(parent), key_(key) {}
+  void write_state(bool value) override;
+ protected:
+  AutoslideDoor *parent_;
+  char key_;
 };
 
-class AutoslideCloseForceNumber : public number::Number, public AutoslideDoorComponentBase {
+// --- Main Component Class ---
+
+class AutoslideDoor : public Component, public uart::UARTDevice
+{
  public:
-  void control(float value) override;
-};
+  AutoslideDoor(uart::UARTComponent *parent);
 
-class AutoslideCloseEndForceNumber : public number::Number, public AutoslideDoorComponentBase {
- public:
-  void control(float value) override;
-};
-
-class AutoslideMotionStateSensor : public text_sensor::TextSensor, public AutoslideDoorComponentBase {};
-class AutoslideLockStateSensor : public text_sensor::TextSensor, public AutoslideDoorComponentBase {};
-
-
-// --- Main Custom Component ---
-
-class AutoslideDoor : public Component, public uart::UARTDevice {
- public:
-  // --- Setter methods for entities ---
-  void set_trigger_button(AutoslideTriggerButton *btn) { this->trigger_button_ = btn; }
-  void set_mode_select(AutoslideModeSelect *sel) { this->mode_select_ = sel; }
-  void set_open_speed_switch(AutoslideOpenSpeedSwitch *sw) { this->open_speed_switch_ = sw; }
-  void set_secure_pet_switch(AutoslideSecurePetSwitch *sw) { this->secure_pet_switch_ = sw; }
-  void set_open_hold_number(AutoslideOpenHoldNumber *num) { this->open_hold_number_ = num; }
-  void set_open_open_force_number(AutoslideOpenForceNumber *num) { this->open_open_force_number_ = num; }
-  void set_close_force_number(AutoslideCloseForceNumber *num) { this->close_force_number_ = num; }
-  void set_close_end_force_number(AutoslideCloseEndForceNumber *num) { this->close_end_force_number_ = num; }
-  void set_motion_state_sensor(AutoslideMotionStateSensor *sen) { this->motion_state_sensor_ = sen; }
-  void set_lock_state_sensor(AutoslideLockStateSensor *sen) { this->lock_state_sensor_ = sen; }
-
-  // --- ESPHome Component Overrides ---
+  // Component lifecycle methods
   void setup() override;
   void loop() override;
-  void update() override;
-  float get_setup_priority() const override { return setup_priority::BUS; }
+  float get_setup_priority() const override;
+  void dump_config() override;
 
-  // --- Autoslide Command Methods ---
-  void send_command(const std::string &command, uint32_t wait_ms = 50);
-  void request_status();
-  void parse_status(const std::string &payload);
+  // Custom actions
+  void trigger_open();
 
-  // --- Entity Callbacks ---
-  void trigger_master();
-  void set_door_mode(int mode);
-  void set_open_speed(bool state);
-  void set_secure_pet(bool state);
-  void set_open_hold_time(float value);
-  void set_open_force(float value);
-  void set_close_force(float value);
-  void set_close_end_force(float value);
+  // Protocol methods
+  bool send_update_command(char key, int value);
+
+  // Utility functions
+  std::string mode_to_string(AutoslideMode mode);
+  std::string motion_state_to_string(AutoslideMotionState state);
+  bool speed_to_bool(AutoslideOpenSpeed speed);
+  bool secure_pet_to_bool(AutoslideSecurePet pet);
+
+  // Private helper functions
+  void request_all_settings();
+  void handle_incoming_command(const std::string &command);
+  void handle_result_command(const std::string &payload);
+  void handle_upsend_command(const std::string &payload);
+  void send_upsend_reply();
+  void update_state(char key, int value);
+  void publish_current_state();
+
+  // ESPHome Configuration Setter Methods
+  void set_mode_select(select::Select *select);
+  void set_open_speed_switch(switch_::Switch *sw);
+  void set_secure_pet_switch(switch_::Switch *sw);
+  void set_open_hold_number(number::Number *number);
+  void set_open_force_number(number::Number *number);
+  void set_close_force_number(number::Number *number);
+  void set_close_end_force_number(number::Number *number);
+  void set_motion_state_sensor(text_sensor::TextSensor *sensor);
+  void set_lock_state_sensor(text_sensor::TextSensor *sensor);
 
  protected:
-  // --- Internal state and buffers ---
+  AutoslideState state_{};
   std::string receive_buffer_;
-  uint32_t last_command_time_{0};
-  uint32_t last_status_update_time_{0};
-  bool waiting_for_result_{false};
+  bool awaiting_result_from_update_{false};
+  uint32_t last_command_sent_time_ms_{0};
 
-  // --- Pointers to all entities ---
-  AutoslideTriggerButton *trigger_button_{nullptr};
-  AutoslideModeSelect *mode_select_{nullptr};
-  AutoslideOpenSpeedSwitch *open_speed_switch_{nullptr};
-  AutoslideSecurePetSwitch *secure_pet_switch_{nullptr};
-  AutoslideOpenHoldNumber *open_hold_number_{nullptr};
-  AutoslideOpenForceNumber *open_open_force_number_{nullptr};
-  AutoslideCloseForceNumber *close_force_number_{nullptr};
-  AutoslideCloseEndForceNumber *close_end_force_number_{nullptr};
-  AutoslideMotionStateSensor *motion_state_sensor_{nullptr};
-  AutoslideLockStateSensor *lock_state_sensor_{nullptr};
-
-  // Utility function for parsing key-value pairs
-  std::map<std::string, std::string> parse_key_values(const std::string &payload);
+  // Pointers to the ESPHome entities defined in YAML
+  select::Select *mode_select_{nullptr};
+  switch_::Switch *open_speed_switch_{nullptr};
+  switch_::Switch *secure_pet_switch_{nullptr};
+  number::Number *open_hold_number_{nullptr};
+  number::Number *open_force_number_{nullptr};
+  number::Number *close_force_number_{nullptr};
+  number::Number *close_end_force_number_{nullptr};
+  text_sensor::TextSensor *motion_state_sensor_{nullptr};
+  text_sensor::TextSensor *lock_state_sensor_{nullptr};
 };
 
 } // namespace autoslide_door
