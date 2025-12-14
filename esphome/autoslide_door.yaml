@@ -29,6 +29,7 @@ uart:
 
 autoslide_door:
   id: autoslide
+  uart_id: autoslide_uart
 
   mode_select:
     name: "Door Mode"
@@ -64,30 +65,6 @@ autoslide_door:
   busy:
     name: "Door Busy"
     device_class: running
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
