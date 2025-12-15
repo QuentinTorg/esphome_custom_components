@@ -178,12 +178,18 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   void set_lock_state_sensor(text_sensor::TextSensor *sensor);
   void set_open_button(button::Button *button);
   void set_busy_sensor(binary_sensor::BinarySensor *sensor);
+  void set_connected_sensor(binary_sensor::BinarySensor *sensor);
 
  protected:
   AutoslideState state_{};
   std::string receive_buffer_;
   bool awaiting_result_from_update_{false};
   uint32_t last_command_sent_time_ms_{0};
+
+  // Connection health
+  bool connected_{false}; // last known connection state
+  uint32_t last_rx_time_ms_{0}; // last time we received any AT frame
+  uint32_t last_poll_time_ms_{0}; // last time we sent a periodic poll
 
   // Pointers to the ESPHome entities defined in YAML
   select::Select *mode_select_{nullptr};
@@ -197,6 +203,7 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   text_sensor::TextSensor *lock_state_sensor_{nullptr};
   button::Button *open_button_{nullptr};
   binary_sensor::BinarySensor *busy_sensor_{nullptr};
+  binary_sensor::BinarySensor *connected_sensor_{nullptr};
 };
 
 } // namespace autoslide_door

@@ -8,7 +8,9 @@ namespace esphome {
 namespace autoslide_door {
 
 static const char *const TAG = "autoslide_door";
-static const uint32_t COMMAND_TIMEOUT_MS = 15000; // 15 seconds as per the guide
+static const uint32_t COMMAND_TIMEOUT_MS = 15000; // 15 s as per the guide
+static const uint32_t POLL_INTERVAL_MS   = 30000; // 30 s periodic poll
+static const uint32_t OFFLINE_TIMEOUT_MS = 60000; // 60 s without RX => offline
 
 // --- Helper Functions for String Conversion (from .h) ---
 
@@ -60,6 +62,10 @@ void AutoslideDoor::setup()
 {
   ESP_LOGCONFIG(TAG, "Setting up Autoslide Door Component...");
   state_ = {};
+  connected_ = false;
+  last_rx_time_ms_ = 0;
+  last_poll_time_ms_ = esphome::millis();
+
   request_all_settings();
 }
 
@@ -126,15 +132,30 @@ void AutoslideDoor::loop()
     }
   }
 
+  const auto now = esphome::millis();
+
   // 2. Handle Command Timeout
   if (awaiting_result_from_update_)
   {
-    uint32_t now = esphome::millis();
     if (now - last_command_sent_time_ms_ > COMMAND_TIMEOUT_MS)
     {
       ESP_LOGE(TAG, "Command timeout! Did not receive AT+RESULT within %u ms.", COMMAND_TIMEOUT_MS);
       awaiting_result_from_update_ = false;
     }
+  }
+
+  // 3. Periodic poll to keep link/state fresh
+  if (!awaiting_result_from_update_ && (now - last_poll_time_ms_ >= POLL_INTERVAL_MS)) {
+    request_all_settings();
+    last_poll_time_ms_ = now;
+  }
+
+  // 4. Offline detection (no RX for a while)
+  if (connected_ && last_rx_time_ms_ != 0 && (now - last_rx_time_ms_ >= OFFLINE_TIMEOUT_MS)) {
+    ESP_LOGW(TAG, "No UART activity for %u ms, marking Autoslide disconnected.", OFFLINE_TIMEOUT_MS);
+    connected_ = false;
+    if (connected_sensor_ != nullptr)
+      connected_sensor_->publish_state(false);
   }
 }
 
@@ -171,8 +192,10 @@ bool AutoslideDoor::send_update_command(char key, int value)
 
   write_str(command.c_str());
 
+  const auto now_ms = esphome::millis();
   awaiting_result_from_update_ = true;
-  last_command_sent_time_ms_ = esphome::millis();
+  last_command_sent_time_ms_ = now_ms;
+  last_poll_time_ms_ = now_ms;
   return true;
 }
 
@@ -194,6 +217,17 @@ void AutoslideDoor::request_all_settings()
 void AutoslideDoor::handle_incoming_command(const std::string &command)
 {
   ESP_LOGV(TAG, "Received raw command: %s", command.c_str());
+
+  // refresh the connection status
+  last_rx_time_ms_ = esphome::millis();
+  if (!connected_)
+  {
+    connected_ = true;
+    if (connected_sensor_ != nullptr)
+    {
+      connected_sensor_->publish_state(true);
+    }
+  }
 
   if (command.length() < 3 || command.substr(0, 3) != "AT+")
   {
@@ -378,6 +412,10 @@ void AutoslideDoor::publish_current_state()
   {
     busy_sensor_->publish_state(awaiting_result_from_update_);
   }
+  if (connected_sensor_ != nullptr)
+  {
+    connected_sensor_->publish_state(connected_);
+  }
 }
 
 // --- ESPHome Configuration Setter Methods ---
@@ -393,6 +431,7 @@ void AutoslideDoor::set_motion_state_sensor(text_sensor::TextSensor *sensor) { m
 void AutoslideDoor::set_lock_state_sensor(text_sensor::TextSensor *sensor) { lock_state_sensor_ = sensor; }
 void AutoslideDoor::set_open_button(button::Button *button) { open_button_ = button; }
 void AutoslideDoor::set_busy_sensor(binary_sensor::BinarySensor *sensor) { busy_sensor_ = sensor; }
+void AutoslideDoor::set_connected_sensor(binary_sensor::BinarySensor *sensor) { connected_sensor_ = sensor; }
 
 // --- Custom Entity Control Implementations ---
 

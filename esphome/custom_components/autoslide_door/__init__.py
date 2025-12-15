@@ -30,6 +30,7 @@ CONF_LOCK_STATE_SENSOR = "lock_state"
 
 CONF_OPEN_BUTTON = "open_button"
 CONF_BUSY_SENSOR = "busy"
+CONF_CONNECTED_SENSOR = "connected"
 
 # --- Classes for entities we construct ---
 AutoslideModeSelect = autoslide_ns.class_("AutoslideModeSelect", select.Select)
@@ -65,6 +66,8 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_OPEN_BUTTON): button.button_schema(AutoslideOpenButton),
 
             cv.Optional(CONF_BUSY_SENSOR): binary_sensor.binary_sensor_schema(),
+
+            cv.Optional(CONF_CONNECTED_SENSOR): binary_sensor.binary_sensor_schema(),
         }
     )
     .extend(uart.UART_DEVICE_SCHEMA)
@@ -171,3 +174,9 @@ async def to_code(config):
             config[CONF_BUSY_SENSOR]
         )
         cg.add(var.set_busy_sensor(busy))
+
+    if CONF_CONNECTED_SENSOR in config:
+        cs = await binary_sensor.new_binary_sensor(
+            config[CONF_CONNECTED_SENSOR]
+        )
+        cg.add(var.set_connected_sensor(cs))
