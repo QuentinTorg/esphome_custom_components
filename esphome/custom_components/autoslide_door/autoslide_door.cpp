@@ -9,7 +9,7 @@ namespace autoslide_door {
 
 static const char *const TAG = "autoslide_door";
 static const uint32_t COMMAND_TIMEOUT_MS = 15000; // 15 s as per the guide
-static const uint32_t POLL_INTERVAL_MS   = 30000; // 30 s periodic poll
+static const uint32_t POLL_INTERVAL_MS   = 10000; // 30 s periodic poll
 static const uint32_t OFFLINE_TIMEOUT_MS = 60000; // 60 s without RX => offline
 
 // --- Helper Functions for String Conversion (from .h) ---
@@ -155,7 +155,9 @@ void AutoslideDoor::loop()
     ESP_LOGW(TAG, "No UART activity for %u ms, marking Autoslide disconnected.", OFFLINE_TIMEOUT_MS);
     connected_ = false;
     if (connected_sensor_ != nullptr)
+    {
       connected_sensor_->publish_state(false);
+    }
   }
 }
 
@@ -218,17 +220,6 @@ void AutoslideDoor::handle_incoming_command(const std::string &command)
 {
   ESP_LOGV(TAG, "Received raw command: %s", command.c_str());
 
-  // refresh the connection status
-  last_rx_time_ms_ = esphome::millis();
-  if (!connected_)
-  {
-    connected_ = true;
-    if (connected_sensor_ != nullptr)
-    {
-      connected_sensor_->publish_state(true);
-    }
-  }
-
   if (command.length() < 3 || command.substr(0, 3) != "AT+")
   {
     ESP_LOGE(TAG, "Invalid AT command prefix: %s", command.c_str());
@@ -264,6 +255,19 @@ void AutoslideDoor::handle_incoming_command(const std::string &command)
   else
   {
     ESP_LOGW(TAG, "Unknown AT command type received: %s", command_type.c_str());
+    // return early so we don't mark connection
+    return;
+  }
+
+  // refresh the connection status
+  last_rx_time_ms_ = esphome::millis();
+  if (!connected_)
+  {
+    connected_ = true;
+    if (connected_sensor_ != nullptr)
+    {
+      connected_sensor_->publish_state(true);
+    }
   }
 }
 
