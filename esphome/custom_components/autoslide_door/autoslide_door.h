@@ -16,8 +16,13 @@ namespace autoslide_door
 
 // --- Constants & Enums based on Autoslide Programmer's Guide ---
 
-// Key 'b'
-static const int TRIGGER_MASTER = 0;
+enum AutoslideTrigger
+{
+    TRIGGER_MASTER = 0,
+    TRIGGER_INDOOR = 1,
+    TRIGGER_PET = 2,
+    TRIGGER_STACK = 3,
+};
 
 // Key 'a': Door Mode
 enum AutoslideMode

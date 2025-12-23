@@ -163,9 +163,9 @@ void AutoslideDoor::loop()
 
 void AutoslideDoor::trigger_open()
 {
-  if (send_update_command('b', TRIGGER_MASTER))
+  if (send_update_command('b', TRIGGER_INDOOR))
   {
-    ESP_LOGD(TAG, "Sent Master Open Trigger (b:0)");
+    ESP_LOGD(TAG, "Sent Master Open Trigger (b:1)");
   }
 }
 
@@ -442,10 +442,22 @@ void AutoslideDoor::set_connected_sensor(binary_sensor::BinarySensor *sensor) { 
 void AutoslideModeSelect::control(const std::string &value)
 {
   int mode_value = -1;
-  if (value == "Auto")      mode_value = MODE_AUTO;
-  else if (value == "Stack") mode_value = MODE_STACK;
-  else if (value == "Lock")  mode_value = MODE_LOCK;
-  else if (value == "Pet")   mode_value = MODE_PET;
+  if (value == "Auto")
+  {
+      mode_value = MODE_AUTO;
+  }
+  else if (value == "Stack")
+  {
+      mode_value = MODE_STACK;
+  }
+  else if (value == "Lock")
+  {
+      mode_value = MODE_LOCK;
+  }
+  else if (value == "Pet")
+  {
+      mode_value = MODE_PET;
+  }
 
   if (mode_value != -1 && parent_ != nullptr)
   {

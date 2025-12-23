@@ -1,17 +1,46 @@
-# Basic ESPHome Configuration
+# Basic ESPHome config
 esphome:
-  name: autoslide-door-controller
-  friendly_name: Autoslide Door
+  name: esphome-autoslide-door-1
+  friendly_name: Autoslide Door Opener
+  min_version: 2025.10.0
+  name_add_mac_suffix: false
 
-# Enable logging for debugging
+# Enable logging
 logger:
-  level: INFO
+  level: VERY_VERBOSE
+  #level: INFO
 
 # ESP32 Configuration
 esp32:
   board: esp32dev
   framework:
     type: esp-idf
+
+# WiFi setup
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Serialautoslidedoor"
+    password: "CknEGleerfgu"
+
+captive_portal:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret autoslide_door_encryption_key
+  on_client_connected:
+    - logger.log:
+        format: "Client %s connected to API with IP %s"
+        args: ["client_info.c_str()", "client_address.c_str()"]
+
+# Allow Over-The-Air updates
+# https://esphome.io/components/ota/esphome.html#updating-the-password
+ota:
+  - platform: esphome
+    id: my_ota
+    password: !secret ota_password
 
 # Custom Component Definition
 # Points ESPHome to your local custom_components folder
@@ -21,11 +50,21 @@ external_components:
       path: custom_components
     components: [ autoslide_door ]
 
+# use this external component in home assistant
+# external_components:
+#   - source:
+#       type: git
+#       url: https://github.com/QuentinTorg/esphome_custom_components
+#       ref: dev
+#       path: esphome/custom_components
+#     components: [ autoslide_door ]
+#     refresh: 60s
+
 uart:
   id: autoslide_uart
   tx_pin: GPIO17
   rx_pin: GPIO16
-  baud_rate: 9600
+  baud_rate: 19200
 
 autoslide_door:
   id: autoslide
