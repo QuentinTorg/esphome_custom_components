@@ -16,65 +16,71 @@ namespace autoslide_door
 
 // --- Constants & Enums based on Autoslide Programmer's Guide ---
 
-enum AutoslideTrigger
+enum class AutoslideTrigger
 {
-    TRIGGER_MASTER = 0,
-    TRIGGER_INDOOR = 1,
-    TRIGGER_PET = 2,
-    TRIGGER_STACK = 3,
+  UNKNOWN = -1,
+  MASTER = 0,
+  INDOOR = 1,
+  PET = 2,
+  STACK = 3,
 };
 
 // Key 'a': Door Mode
-enum AutoslideMode
+enum class AutoslideMode
 {
-  MODE_AUTO = 0,
-  MODE_STACK = 1,
-  MODE_LOCK = 2,
-  MODE_PET = 3,
+  UNKNOWN = -1,
+  AUTO = 0,
+  STACK = 1,
+  LOCK = 2,
+  PET = 3,
 };
 
 // Key 'e': Open Speed (Slow/Fast)
-enum AutoslideOpenSpeed
+enum class AutoslideOpenSpeed
 {
-  OPEN_SPEED_FAST = 0, // Maps to Switch OFF
-  OPEN_SPEED_SLOW = 1, // Maps to Switch ON (Default behavior)
+  UNKNOWN = -1,
+  FAST = 0, // Maps to Switch OFF
+  SLOW = 1, // Maps to Switch ON (Default behavior)
 };
 
 // Key 'g': Secure Pet Mode (Pet On/Pet Off)
-enum AutoslideSecurePet
+enum class AutoslideSecurePet
 {
-  SECURE_PET_ON = 0,  // Maps to Switch OFF
-  SECURE_PET_OFF = 1, // Maps to Switch ON (Default behavior)
+  UNKNOWN = -1,
+  ON = 0,  // Maps to Switch OFF
+  OFF = 1, // Maps to Switch ON (Default behavior)
 };
 
 // Key 'm': Motion State (Read-only)
-enum AutoslideMotionState
+enum class AutoslideMotionState
 {
-  MOTION_STOPPED = 0,
-  MOTION_OPENING = 1,
-  MOTION_CLOSING = 2,
+  UNKNOWN = -1,
+  STOPPED = 0,
+  OPENING = 1,
+  CLOSING = 2,
 };
 
 // Key 'c': Lock State (Read-only)
-enum AutoslideLockedState
+enum class AutoslideLockedState
 {
-  STATE_UNLOCKED = 0,
-  STATE_LOCKED = 1,
+  UNKNOWN = -1,
+  UNLOCKED = 0,
+  LOCKED = 1,
 };
 
 // --- State Struct ---
 
 struct AutoslideState
 {
-  AutoslideMode door_mode{MODE_LOCK};
-  AutoslideOpenSpeed open_speed{OPEN_SPEED_FAST};
-  AutoslideSecurePet secure_pet{SECURE_PET_ON};
+  AutoslideMode door_mode{AutoslideMode::LOCK};
+  AutoslideOpenSpeed open_speed{AutoslideOpenSpeed::FAST};
+  AutoslideSecurePet secure_pet{AutoslideSecurePet::ON};
   uint8_t open_hold_duration{0}; // Key 'j' (0-25)
   uint8_t open_force{0};         // Key 'C' (0-7)
   uint8_t close_force{0};        // Key 'z' (0-7)
   uint8_t close_end_force{0};    // Key 'A' (0-7)
-  AutoslideMotionState motion_state{MOTION_STOPPED};
-  AutoslideLockedState lock_state{STATE_LOCKED};
+  AutoslideMotionState motion_state{AutoslideMotionState::STOPPED};
+  AutoslideLockedState lock_state{AutoslideLockedState::LOCKED};
   uint8_t motion_trigger{0};     // Key 'n' (Raw trigger value)
 };
 
@@ -168,8 +174,8 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   void handle_result_command(const std::string &payload);
   void handle_upsend_command(const std::string &payload);
   void send_upsend_reply();
-  void update_state(char key, int value);
-  void publish_current_state();
+  void update_state(const char key, const int value);
+  void publish_current_state(bool force = false);
 
   // ESPHome Configuration Setter Methods
   void set_mode_select(select::Select *select);
@@ -187,6 +193,7 @@ class AutoslideDoor : public Component, public uart::UARTDevice
 
  protected:
   AutoslideState state_{};
+  AutoslideState last_published_state_{};
   std::string receive_buffer_;
   bool awaiting_result_from_update_{false};
   uint32_t last_command_sent_time_ms_{0};
@@ -195,6 +202,8 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   bool connected_{false}; // last known connection state
   uint32_t last_rx_time_ms_{0}; // last time we received any AT frame
   uint32_t last_poll_time_ms_{0}; // last time we sent a periodic poll
+
+  bool have_published_once_{false};
 
   // Pointers to the ESPHome entities defined in YAML
   select::Select *mode_select_{nullptr};

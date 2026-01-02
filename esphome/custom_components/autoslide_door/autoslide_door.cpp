@@ -9,7 +9,7 @@ namespace autoslide_door {
 
 static const char *const TAG = "autoslide_door";
 static const uint32_t COMMAND_TIMEOUT_MS = 15000; // 15 s as per the guide
-static const uint32_t POLL_INTERVAL_MS   = 10000; // 30 s periodic poll
+static const uint32_t POLL_INTERVAL_MS   = 3000; // 3 s periodic poll
 static const uint32_t OFFLINE_TIMEOUT_MS = 60000; // 60 s without RX => offline
 
 // --- Helper Functions for String Conversion (from .h) ---
@@ -18,13 +18,13 @@ std::string AutoslideDoor::mode_to_string(AutoslideMode mode) const
 {
   switch (mode)
   {
-    case MODE_AUTO:
+    case AutoslideMode::AUTO:
       return "Auto";
-    case MODE_STACK:
+    case AutoslideMode::STACK:
       return "Stack";
-    case MODE_LOCK:
+    case AutoslideMode::LOCK:
       return "Lock";
-    case MODE_PET:
+    case AutoslideMode::PET:
       return "Pet";
     default:
       return "Unknown";
@@ -35,11 +35,11 @@ std::string AutoslideDoor::motion_state_to_string(AutoslideMotionState state) co
 {
   switch (state)
   {
-    case MOTION_STOPPED:
+    case AutoslideMotionState::STOPPED:
       return "Stopped";
-    case MOTION_OPENING:
+    case AutoslideMotionState::OPENING:
       return "Opening";
-    case MOTION_CLOSING:
+    case AutoslideMotionState::CLOSING:
       return "Closing";
     default:
       return "Unknown";
@@ -48,12 +48,12 @@ std::string AutoslideDoor::motion_state_to_string(AutoslideMotionState state) co
 
 bool AutoslideDoor::speed_to_bool(AutoslideOpenSpeed speed) const
 {
-  return speed == OPEN_SPEED_SLOW;
+  return speed == AutoslideOpenSpeed::SLOW;
 }
 
 bool AutoslideDoor::secure_pet_to_bool(AutoslideSecurePet pet) const
 {
-  return pet == SECURE_PET_OFF;
+  return pet == AutoslideSecurePet::OFF;
 }
 
 // --- AutoslideDoor Component Implementation ---
@@ -82,14 +82,14 @@ void AutoslideDoor::dump_config()
     ESP_LOGCONFIG(TAG, "  now:                       %u", esphome::millis());
     ESP_LOGCONFIG(TAG, "  state:");
     ESP_LOGCONFIG(TAG, "    mode: %s", mode_to_string(state_.door_mode).c_str());
-    ESP_LOGCONFIG(TAG, "    open_speed %s", state_.open_speed == OPEN_SPEED_FAST ? "fast" : "slow");
-    ESP_LOGCONFIG(TAG, "    secure_pet: %s", state_.secure_pet == SECURE_PET_ON ? "on" : "off");
+    ESP_LOGCONFIG(TAG, "    open_speed %s", state_.open_speed == AutoslideOpenSpeed::FAST ? "fast" : "slow");
+    ESP_LOGCONFIG(TAG, "    secure_pet: %s", state_.secure_pet == AutoslideSecurePet::ON ? "on" : "off");
     ESP_LOGCONFIG(TAG, "    open_hold_duration: %i", state_.open_hold_duration);
     ESP_LOGCONFIG(TAG, "    open_force: %i", state_.open_force);
     ESP_LOGCONFIG(TAG, "    close_force: %i", state_.close_force);
     ESP_LOGCONFIG(TAG, "    close_end_force: %i", state_.close_end_force);
     ESP_LOGCONFIG(TAG, "    motion_state: %s", motion_state_to_string(state_.motion_state).c_str());
-    ESP_LOGCONFIG(TAG, "    lock_state: %s", state_.lock_state == STATE_LOCKED ? "locked" : "unlocked");
+    ESP_LOGCONFIG(TAG, "    lock_state: %s", state_.lock_state == AutoslideLockedState::LOCKED ? "locked" : "unlocked");
     ESP_LOGCONFIG(TAG, "    motion_trigger: %i", state_.motion_trigger);
 }
 
@@ -163,7 +163,7 @@ void AutoslideDoor::loop()
 
 void AutoslideDoor::trigger_open()
 {
-  if (send_update_command('b', TRIGGER_INDOOR))
+  if (send_update_command('b', static_cast<int>(AutoslideTrigger::INDOOR)))
   {
     ESP_LOGD(TAG, "Sent Master Open Trigger (b:1)");
   }
@@ -212,7 +212,7 @@ void AutoslideDoor::request_all_settings()
 {
   if (send_update_command('d', 0))
   {
-    ESP_LOGI(TAG, "Requesting initial door settings (d:0)...");
+    ESP_LOGI(TAG, "Requesting all door settings (d:0)...");
   }
 }
 
@@ -339,21 +339,20 @@ void AutoslideDoor::handle_upsend_command(const std::string &payload)
   publish_current_state();
 }
 
-void AutoslideDoor::update_state(char key, int value)
+void AutoslideDoor::update_state(const char key, const int value)
 {
   switch (key)
   {
-    case 'a': state_.door_mode = (AutoslideMode) value; break;
-    case 'e': state_.open_speed = (AutoslideOpenSpeed) value; break;
-    case 'g': state_.secure_pet = (AutoslideSecurePet) value; break;
-    case 'j': state_.open_hold_duration = (uint8_t) value; break;
-    case 'C': state_.open_force = (uint8_t) value; break;
-    case 'z': state_.close_force = (uint8_t) value; break;
-    case 'A': state_.close_end_force = (uint8_t) value; break;
-
-    case 'm': state_.motion_state = (AutoslideMotionState) value; break;
-    case 'c': state_.lock_state = (AutoslideLockedState) value; break;
-    case 'n': state_.motion_trigger = (uint8_t) value; break;
+    case 'a': state_.door_mode = static_cast<AutoslideMode>(value); break;
+    case 'e': state_.open_speed = static_cast<AutoslideOpenSpeed>(value); break;
+    case 'g': state_.secure_pet = static_cast<AutoslideSecurePet>(value); break;
+    case 'j': state_.open_hold_duration = static_cast<uint8_t>(value); break;
+    case 'C': state_.open_force = static_cast<uint8_t>(value); break;
+    case 'z': state_.close_force = static_cast<uint8_t>(value); break;
+    case 'A': state_.close_end_force = static_cast<uint8_t>(value); break;
+    case 'm': state_.motion_state = static_cast<AutoslideMotionState>(value); break;
+    case 'c': state_.lock_state = static_cast<AutoslideLockedState>(value); break;
+    case 'n': state_.motion_trigger = static_cast<uint8_t>(value); break;
     default:
       if (key != 'r')
       {
@@ -363,7 +362,7 @@ void AutoslideDoor::update_state(char key, int value)
   }
 }
 
-void AutoslideDoor::publish_current_state()
+void AutoslideDoor::publish_current_state(bool force)
 {
   ESP_LOGV(TAG, "Publishing current state to ESPHome entities...");
 
@@ -400,16 +399,16 @@ void AutoslideDoor::publish_current_state()
     const char *motion_str;
     switch (state_.motion_state)
     {
-      case MOTION_STOPPED: motion_str = "Stopped"; break;
-      case MOTION_OPENING: motion_str = "Opening"; break;
-      case MOTION_CLOSING: motion_str = "Closing"; break;
+        case AutoslideMotionState::STOPPED: motion_str = "Stopped"; break;
+        case AutoslideMotionState::OPENING: motion_str = "Opening"; break;
+        case AutoslideMotionState::CLOSING: motion_str = "Closing"; break;
       default: motion_str = "Unknown"; break;
     }
     motion_state_sensor_->publish_state(motion_str);
   }
   if (lock_state_sensor_ != nullptr)
   {
-    const char *lock_str = (state_.lock_state == STATE_LOCKED) ? "Locked" : "Unlocked";
+    const char *lock_str = (state_.lock_state == AutoslideLockedState::LOCKED) ? "Locked" : "Unlocked";
     lock_state_sensor_->publish_state(lock_str);
   }
   if (busy_sensor_ != nullptr)
@@ -441,31 +440,31 @@ void AutoslideDoor::set_connected_sensor(binary_sensor::BinarySensor *sensor) { 
 
 void AutoslideModeSelect::control(const std::string &value)
 {
-  int mode_value = -1;
+  AutoslideMode mode_value = AutoslideMode::UNKNOWN;
   if (value == "Auto")
   {
-      mode_value = MODE_AUTO;
+      mode_value = AutoslideMode::AUTO;
   }
   else if (value == "Stack")
   {
-      mode_value = MODE_STACK;
+      mode_value = AutoslideMode::STACK;
   }
   else if (value == "Lock")
   {
-      mode_value = MODE_LOCK;
+      mode_value = AutoslideMode::LOCK;
   }
   else if (value == "Pet")
   {
-      mode_value = MODE_PET;
+      mode_value = AutoslideMode::PET;
   }
 
-  if (mode_value != -1 && parent_ != nullptr)
+  if (mode_value != AutoslideMode::UNKNOWN && parent_ != nullptr)
   {
-    if (parent_->send_update_command('a', mode_value))
+    if (parent_->send_update_command('a', static_cast<int>(mode_value)))
     {
       ESP_LOGI(TAG, "Sent mode command: %s (converted to %s)",
                value.c_str(),
-               parent_->mode_to_string((AutoslideMode) mode_value).c_str());
+               parent_->mode_to_string(mode_value).c_str());
     }
   }
   else
@@ -502,11 +501,11 @@ void AutoslideOnOffSwitch::write_state(bool value)
 
   if (key_ == 'e')
   { // Open Speed: ON(true) = SLOW(1), OFF(false) = FAST(0)
-    protocol_value = value ? OPEN_SPEED_SLOW : OPEN_SPEED_FAST;
+    protocol_value = static_cast<int>(value ? AutoslideOpenSpeed::SLOW : AutoslideOpenSpeed::FAST);
   }
   else if (key_ == 'g')
   { // Secure Pet: ON(true) = OFF(1), OFF(false) = ON(0)
-    protocol_value = value ? SECURE_PET_OFF : SECURE_PET_ON;
+    protocol_value = static_cast<int>(value ? AutoslideSecurePet::OFF : AutoslideSecurePet::ON);
   }
 
   if (protocol_value != -1)
