@@ -62,7 +62,6 @@ void AutoslideDoor::setup()
 {
   ESP_LOGCONFIG(TAG, "Setting up Autoslide Door Component...");
   state_ = {};
-  connected_ = false;
   last_rx_time_ms_ = 0;
   last_poll_time_ms_ = esphome::millis();
 
@@ -151,9 +150,9 @@ void AutoslideDoor::loop()
   }
 
   // 4. Offline detection (no RX for a while)
-  if (connected_ && last_rx_time_ms_ != 0 && (now - last_rx_time_ms_ >= OFFLINE_TIMEOUT_MS)) {
+  if (state_.connected && last_rx_time_ms_ != 0 && (now - last_rx_time_ms_ >= OFFLINE_TIMEOUT_MS)) {
     ESP_LOGW(TAG, "No UART activity for %u ms, marking Autoslide disconnected.", OFFLINE_TIMEOUT_MS);
-    connected_ = false;
+    state_.connected = false;
     if (connected_sensor_ != nullptr)
     {
       connected_sensor_->publish_state(false);
@@ -261,9 +260,9 @@ void AutoslideDoor::handle_incoming_command(const std::string &command)
 
   // refresh the connection status
   last_rx_time_ms_ = esphome::millis();
-  if (!connected_)
+  if (!state_.connected)
   {
-    connected_ = true;
+    state_.connected = true;
     if (connected_sensor_ != nullptr)
     {
       connected_sensor_->publish_state(true);
@@ -364,61 +363,100 @@ void AutoslideDoor::update_state(const char key, const int value)
 
 void AutoslideDoor::publish_current_state(bool force)
 {
-  ESP_LOGV(TAG, "Publishing current state to ESPHome entities...");
+  ESP_LOGV(TAG, "Publishing current state to ESPHome entities (force=%s)...", force ? "true" : "false");
 
-  if (mode_select_ != nullptr)
+  if (not have_published_once_)
   {
-    mode_select_->publish_state(mode_to_string(state_.door_mode));
+      // override force if we haven't published anything yet
+      ESP_LOGV(TAG, "Overriding publish force to true because initial states have not yet been published");
+      force = true;
   }
-  if (open_speed_switch_ != nullptr)
-  {
-    open_speed_switch_->publish_state(speed_to_bool(state_.open_speed));
+
+  // Mode select
+  if (mode_select_ != nullptr) {
+    if (force || state_.door_mode != last_published_state_.door_mode) {
+      mode_select_->publish_state(mode_to_string(state_.door_mode));
+    }
   }
-  if (secure_pet_switch_ != nullptr)
-  {
-    secure_pet_switch_->publish_state(secure_pet_to_bool(state_.secure_pet));
+
+  // Open speed
+  if (open_speed_switch_ != nullptr) {
+    if (force || state_.open_speed != last_published_state_.open_speed) {
+      open_speed_switch_->publish_state(speed_to_bool(state_.open_speed));
+    }
   }
-  if (open_hold_number_ != nullptr)
-  {
-    open_hold_number_->publish_state(state_.open_hold_duration);
+
+  // Secure pet
+  if (secure_pet_switch_ != nullptr) {
+    if (force || state_.secure_pet != last_published_state_.secure_pet) {
+      secure_pet_switch_->publish_state(secure_pet_to_bool(state_.secure_pet));
+    }
   }
-  if (open_force_number_ != nullptr)
-  {
-    open_force_number_->publish_state(state_.open_force);
+
+  // Open hold duration
+  if (open_hold_number_ != nullptr) {
+    if (force || state_.open_hold_duration != last_published_state_.open_hold_duration) {
+      open_hold_number_->publish_state(state_.open_hold_duration);
+    }
   }
-  if (close_force_number_ != nullptr)
-  {
-    close_force_number_->publish_state(state_.close_force);
+
+  // Forces
+  if (open_force_number_ != nullptr) {
+    if (force || state_.open_force != last_published_state_.open_force) {
+      open_force_number_->publish_state(state_.open_force);
+    }
   }
-  if (close_end_force_number_ != nullptr)
-  {
-    close_end_force_number_->publish_state(state_.close_end_force);
+  if (close_force_number_ != nullptr) {
+    if (force || state_.close_force != last_published_state_.close_force) {
+      close_force_number_->publish_state(state_.close_force);
+    }
   }
-  if (motion_state_sensor_ != nullptr)
-  {
-    const char *motion_str;
-    switch (state_.motion_state)
-    {
+  if (close_end_force_number_ != nullptr) {
+    if (force || state_.close_end_force != last_published_state_.close_end_force) {
+      close_end_force_number_->publish_state(state_.close_end_force);
+    }
+  }
+
+  // Motion state text
+  if (motion_state_sensor_ != nullptr) {
+    if (force || state_.motion_state != last_published_state_.motion_state) {
+      const char *motion_str = "Unknown";
+      switch (state_.motion_state) {
         case AutoslideMotionState::STOPPED: motion_str = "Stopped"; break;
         case AutoslideMotionState::OPENING: motion_str = "Opening"; break;
         case AutoslideMotionState::CLOSING: motion_str = "Closing"; break;
-      default: motion_str = "Unknown"; break;
+        default: break;
+      }
+      motion_state_sensor_->publish_state(motion_str);
     }
-    motion_state_sensor_->publish_state(motion_str);
   }
-  if (lock_state_sensor_ != nullptr)
-  {
-    const char *lock_str = (state_.lock_state == AutoslideLockedState::LOCKED) ? "Locked" : "Unlocked";
-    lock_state_sensor_->publish_state(lock_str);
+
+  // Lock state text
+  if (lock_state_sensor_ != nullptr) {
+    if (force || state_.lock_state != last_published_state_.lock_state) {
+      const char *lock_str = (state_.lock_state == AutoslideLockedState::LOCKED) ? "Locked" : "Unlocked";
+      lock_state_sensor_->publish_state(lock_str);
+    }
   }
-  if (busy_sensor_ != nullptr)
-  {
-    busy_sensor_->publish_state(awaiting_result_from_update_);
+
+  // Busy sensor
+  if (busy_sensor_ != nullptr) {
+    if (force || awaiting_result_from_update_ != last_published_busy_) {
+      busy_sensor_->publish_state(awaiting_result_from_update_);
+      last_published_busy_ = awaiting_result_from_update_;
+    }
   }
-  if (connected_sensor_ != nullptr)
-  {
-    connected_sensor_->publish_state(connected_);
+
+  // Connection sensor
+  if (connected_sensor_ != nullptr) {
+    if (force || state_.connected != last_published_state_.connected) {
+      connected_sensor_->publish_state(state_.connected);
+    }
   }
+
+  // Update cache and mark first publish done
+  last_published_state_ = state_;
+  have_published_once_ = true;
 }
 
 // --- ESPHome Configuration Setter Methods ---

@@ -82,6 +82,7 @@ struct AutoslideState
   AutoslideMotionState motion_state{AutoslideMotionState::STOPPED};
   AutoslideLockedState lock_state{AutoslideLockedState::LOCKED};
   uint8_t motion_trigger{0};     // Key 'n' (Raw trigger value)
+  bool connected{false};
 };
 
 // Forward declaration of the main component class
@@ -199,11 +200,11 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   uint32_t last_command_sent_time_ms_{0};
 
   // Connection health
-  bool connected_{false}; // last known connection state
   uint32_t last_rx_time_ms_{0}; // last time we received any AT frame
   uint32_t last_poll_time_ms_{0}; // last time we sent a periodic poll
 
   bool have_published_once_{false};
+  bool last_published_busy_{false};
 
   // Pointers to the ESPHome entities defined in YAML
   select::Select *mode_select_{nullptr};
