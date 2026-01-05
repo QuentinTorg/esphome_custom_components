@@ -8,8 +8,8 @@ namespace esphome {
 namespace autoslide_door {
 
 static const char *const TAG = "autoslide_door";
-static const uint32_t COMMAND_TIMEOUT_MS = 15000; // 15 s as per the guide
-static const uint32_t POLL_INTERVAL_MS   = 3000; // 3 s periodic poll
+static const uint32_t COMMAND_TIMEOUT_MS = 10000; // 10 s timeout with no response
+static const uint32_t POLL_INTERVAL_MS   = 10000; // 1 s periodic poll
 static const uint32_t OFFLINE_TIMEOUT_MS = 60000; // 60 s without RX => offline
 
 // --- Helper Functions for String Conversion (from .h) ---
@@ -65,7 +65,10 @@ void AutoslideDoor::setup()
   last_rx_time_ms_ = 0;
   last_poll_time_ms_ = esphome::millis();
 
-  request_all_settings();
+  receive_buffer_.reserve(256);
+
+  // as soon as its available, request latest state from door
+  queued_state_request_ = true;
 }
 
 float AutoslideDoor::get_setup_priority() const
@@ -95,11 +98,16 @@ void AutoslideDoor::dump_config()
 void AutoslideDoor::loop()
 {
   // 1. Read incoming UART data
-  while (available())
+  size_t bytes_read{0};
+  size_t commands_received{0};
+  uint8_t byte;
+  while (available() and bytes_read < 256 and commands_received < 1)
   {
-    uint8_t byte;
-    if (!read_byte(&byte))  // defensive: skip if nothing read
+    if (!read_byte(&byte))
+    {
       break;
+    }
+    ++bytes_read;
 
     // The Autoslide protocol uses the escape character (0x1B) to terminate commands.
     if (byte == 0x1B)
@@ -108,6 +116,7 @@ void AutoslideDoor::loop()
       if (!receive_buffer_.empty())
       {
         handle_incoming_command(receive_buffer_);
+        ++commands_received;
       }
       // Clear buffer for the next command
       receive_buffer_.clear();
@@ -115,7 +124,7 @@ void AutoslideDoor::loop()
     else if (byte == '\r' || byte == '\n')
     {
       // Ignore stray CR/LF if they ever appear
-      ESP_LOGI(TAG, "Received unexpected whitespace character from serial bus");
+      ESP_LOGV(TAG, "Received unexpected whitespace character from serial bus");
     }
     else
     {
@@ -140,17 +149,35 @@ void AutoslideDoor::loop()
     {
       ESP_LOGE(TAG, "Command timeout! Did not receive AT+RESULT within %u ms.", COMMAND_TIMEOUT_MS);
       awaiting_result_from_update_ = false;
+      block_warned_ = false;
+      queued_state_request_ = true;
     }
   }
 
-  // 3. Periodic poll to keep link/state fresh
-  if (!awaiting_result_from_update_ && (now - last_poll_time_ms_ >= POLL_INTERVAL_MS)) {
-    request_all_settings();
-    last_poll_time_ms_ = now;
+  // handle queued commands if we aren't waiting on anything anymore
+  if (!awaiting_result_from_update_)
+  {
+    if (queued_publish_)
+    {
+      publish_current_state();
+    }
+    else if (queued_trigger_)
+    {
+      trigger_open();
+    }
+    else if (queued_mode_.has_value())
+    {
+      set_mode(queued_mode_.value());
+    }
+    else if (queued_state_request_ or now - last_poll_time_ms_ >= POLL_INTERVAL_MS)
+    {
+      request_all_settings();
+    }
   }
 
   // 4. Offline detection (no RX for a while)
-  if (state_.connected && last_rx_time_ms_ != 0 && (now - last_rx_time_ms_ >= OFFLINE_TIMEOUT_MS)) {
+  if (state_.connected && last_rx_time_ms_ != 0 && (now - last_rx_time_ms_ >= OFFLINE_TIMEOUT_MS))
+  {
     ESP_LOGW(TAG, "No UART activity for %u ms, marking Autoslide disconnected.", OFFLINE_TIMEOUT_MS);
     state_.connected = false;
     if (connected_sensor_ != nullptr)
@@ -158,6 +185,7 @@ void AutoslideDoor::loop()
       connected_sensor_->publish_state(false);
     }
   }
+
 }
 
 void AutoslideDoor::trigger_open()
@@ -165,6 +193,26 @@ void AutoslideDoor::trigger_open()
   if (send_update_command('b', static_cast<int>(AutoslideTrigger::INDOOR)))
   {
     ESP_LOGD(TAG, "Sent Master Open Trigger (b:1)");
+    queued_trigger_ = false;
+  }
+  else
+  {
+    ESP_LOGD(TAG, "Trigger open failed, queuing open trigger");
+    queued_trigger_ = true;
+  }
+}
+
+void AutoslideDoor::set_mode(const AutoslideMode& mode)
+{
+  if (send_update_command('a', static_cast<int>(mode)))
+  {
+    ESP_LOGD(TAG, "Sent mode %s (%i)", mode_to_string(mode).c_str(), static_cast<int>(mode));
+    queued_mode_ = {};
+  }
+  else
+  {
+    ESP_LOGD(TAG, "Changing mode failed, queuing mode change to %s", mode_to_string(mode).c_str());
+    queued_mode_ = mode;
   }
 }
 
@@ -174,7 +222,10 @@ bool AutoslideDoor::send_update_command(char key, int value)
 {
   if (awaiting_result_from_update_)
   {
-    ESP_LOGW(TAG, "Cannot send command ('%c':%d). Waiting for AT+RESULT from previous command.", key, value);
+    if (not block_warned_) {
+      ESP_LOGW(TAG, "Cannot send command ('%c':%d). Waiting for AT+RESULT from previous command.", key, value);
+      block_warned_ = true;  // only warn once per busy window
+    }
     return false;
   }
 
@@ -196,7 +247,10 @@ bool AutoslideDoor::send_update_command(char key, int value)
   const auto now_ms = esphome::millis();
   awaiting_result_from_update_ = true;
   last_command_sent_time_ms_ = now_ms;
-  last_poll_time_ms_ = now_ms;
+
+  inflight_key_ = key;
+  inflight_value_ = value;
+
   return true;
 }
 
@@ -212,6 +266,8 @@ void AutoslideDoor::request_all_settings()
   if (send_update_command('d', 0))
   {
     ESP_LOGI(TAG, "Requesting all door settings (d:0)...");
+    queued_state_request_ = false;
+    last_poll_time_ms_ = esphome::millis();
   }
 }
 
@@ -275,6 +331,7 @@ void AutoslideDoor::handle_result_command(const std::string &payload)
   ESP_LOGD(TAG, "Received AT+RESULT with payload: %s", payload.c_str());
 
   awaiting_result_from_update_ = false;
+  block_warned_ = false;
 
   std::stringstream ss(payload);
   std::string key_value_pair;
@@ -288,19 +345,30 @@ void AutoslideDoor::handle_result_command(const std::string &payload)
       continue;
     }
 
-    char key = key_value_pair[0];
-    std::string value_str = key_value_pair.substr(colon_pos + 1);
-    int value = atoi(value_str.c_str());
+    if (colon_pos != 1)
+    {
+        ESP_LOGW(TAG, "Malformed key-value pair, key had length of more than one: %s", key_value_pair.c_str());
+        continue;
+    }
+
+    const char key = key_value_pair[0];
+    const int value = atoi(key_value_pair.c_str() + colon_pos + 1);
 
     if (key == 'r')
     {
       if (value == 1)
       {
         ESP_LOGI(TAG, "Command acknowledged successfully.");
+        if (inflight_key_ != 0 and inflight_key_ != 'b' and inflight_key_ != 'd')
+        {
+          // Only for writable keys that represent settings (skip 'b' and 'd')
+          update_state(inflight_key_, inflight_value_);
+        }
       }
       else
       {
-        ESP_LOGE(TAG, "Command failed to execute (r:0).");
+        ESP_LOGE(TAG, "Command failed to execute (r:%d).", value);
+        queued_state_request_ = true; // request new state if response fails
       }
     }
     else
@@ -308,7 +376,9 @@ void AutoslideDoor::handle_result_command(const std::string &payload)
       update_state(key, value);
     }
   }
-  publish_current_state();
+
+  inflight_key_ = 0;
+  queued_publish_ = true;
 }
 
 void AutoslideDoor::handle_upsend_command(const std::string &payload)
@@ -335,7 +405,7 @@ void AutoslideDoor::handle_upsend_command(const std::string &payload)
 
     update_state(key, value);
   }
-  publish_current_state();
+  queued_publish_ = true;
 }
 
 void AutoslideDoor::update_state(const char key, const int value)
@@ -439,14 +509,6 @@ void AutoslideDoor::publish_current_state(bool force)
     }
   }
 
-  // Busy sensor
-  if (busy_sensor_ != nullptr) {
-    if (force || awaiting_result_from_update_ != last_published_busy_) {
-      busy_sensor_->publish_state(awaiting_result_from_update_);
-      last_published_busy_ = awaiting_result_from_update_;
-    }
-  }
-
   // Connection sensor
   if (connected_sensor_ != nullptr) {
     if (force || state_.connected != last_published_state_.connected) {
@@ -457,6 +519,7 @@ void AutoslideDoor::publish_current_state(bool force)
   // Update cache and mark first publish done
   last_published_state_ = state_;
   have_published_once_ = true;
+  queued_publish_ = false;
 }
 
 // --- ESPHome Configuration Setter Methods ---
@@ -471,7 +534,6 @@ void AutoslideDoor::set_close_end_force_number(number::Number *number) { close_e
 void AutoslideDoor::set_motion_state_sensor(text_sensor::TextSensor *sensor) { motion_state_sensor_ = sensor; }
 void AutoslideDoor::set_lock_state_sensor(text_sensor::TextSensor *sensor) { lock_state_sensor_ = sensor; }
 void AutoslideDoor::set_open_button(button::Button *button) { open_button_ = button; }
-void AutoslideDoor::set_busy_sensor(binary_sensor::BinarySensor *sensor) { busy_sensor_ = sensor; }
 void AutoslideDoor::set_connected_sensor(binary_sensor::BinarySensor *sensor) { connected_sensor_ = sensor; }
 
 // --- Custom Entity Control Implementations ---
@@ -498,12 +560,11 @@ void AutoslideModeSelect::control(const std::string &value)
 
   if (mode_value != AutoslideMode::UNKNOWN && parent_ != nullptr)
   {
-    if (parent_->send_update_command('a', static_cast<int>(mode_value)))
-    {
-      ESP_LOGI(TAG, "Sent mode command: %s (converted to %s)",
+      ESP_LOGI(TAG, "Sending mode command: %s (converted to %s)",
                value.c_str(),
                parent_->mode_to_string(mode_value).c_str());
-    }
+
+      parent_->set_mode(mode_value);
   }
   else
   {

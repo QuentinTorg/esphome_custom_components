@@ -29,7 +29,6 @@ CONF_MOTION_STATE_SENSOR = "motion_state"
 CONF_LOCK_STATE_SENSOR = "lock_state"
 
 CONF_OPEN_BUTTON = "open_button"
-CONF_BUSY_SENSOR = "busy"
 CONF_CONNECTED_SENSOR = "connected"
 
 # --- Classes for entities we construct ---
@@ -64,8 +63,6 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_LOCK_STATE_SENSOR): text_sensor.text_sensor_schema(),
 
             cv.Optional(CONF_OPEN_BUTTON): button.button_schema(AutoslideOpenButton),
-
-            cv.Optional(CONF_BUSY_SENSOR): binary_sensor.binary_sensor_schema(),
 
             cv.Optional(CONF_CONNECTED_SENSOR): binary_sensor.binary_sensor_schema(),
         }
@@ -167,13 +164,6 @@ async def to_code(config):
         btn = await button.new_button(config[CONF_OPEN_BUTTON])
         cg.add(btn.set_parent(var))
         cg.add(var.set_open_button(btn))
-
-    # --- Busy Sensor ---
-    if CONF_BUSY_SENSOR in config:
-        busy = await binary_sensor.new_binary_sensor(
-            config[CONF_BUSY_SENSOR]
-        )
-        cg.add(var.set_busy_sensor(busy))
 
     if CONF_CONNECTED_SENSOR in config:
         cs = await binary_sensor.new_binary_sensor(

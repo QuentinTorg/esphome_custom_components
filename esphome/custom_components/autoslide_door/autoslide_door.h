@@ -9,6 +9,8 @@
 #include "esphome/components/uart/uart.h"
 #include "esphome/core/component.h"
 
+#include <optional>
+
 namespace esphome
 {
 namespace autoslide_door
@@ -159,24 +161,29 @@ class AutoslideDoor : public Component, public uart::UARTDevice
 
   // Custom actions
   void trigger_open();
+  void set_mode(const AutoslideMode& mode);
+  void request_all_settings();
 
-  // Protocol methods
+  // send key/value update command to door opener
   bool send_update_command(char key, int value);
+  void send_upsend_reply();
+
+  // handle all incoming commands from door opener
+  void handle_incoming_command(const std::string &command);
+  void handle_result_command(const std::string &payload);
+  void handle_upsend_command(const std::string &payload);
+
+  // update internal state based on new key/value params
+  void update_state(const char key, const int value);
+
+  // publish current state to wifi devices/sensors
+  void publish_current_state(bool force = false);
 
   // Utility functions
   std::string mode_to_string(AutoslideMode mode) const;
   std::string motion_state_to_string(AutoslideMotionState state) const;
   bool speed_to_bool(AutoslideOpenSpeed speed) const;
   bool secure_pet_to_bool(AutoslideSecurePet pet) const;
-
-  // Private helper functions
-  void request_all_settings();
-  void handle_incoming_command(const std::string &command);
-  void handle_result_command(const std::string &payload);
-  void handle_upsend_command(const std::string &payload);
-  void send_upsend_reply();
-  void update_state(const char key, const int value);
-  void publish_current_state(bool force = false);
 
   // ESPHome Configuration Setter Methods
   void set_mode_select(select::Select *select);
@@ -189,7 +196,6 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   void set_motion_state_sensor(text_sensor::TextSensor *sensor);
   void set_lock_state_sensor(text_sensor::TextSensor *sensor);
   void set_open_button(button::Button *button);
-  void set_busy_sensor(binary_sensor::BinarySensor *sensor);
   void set_connected_sensor(binary_sensor::BinarySensor *sensor);
 
  protected:
@@ -204,7 +210,18 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   uint32_t last_poll_time_ms_{0}; // last time we sent a periodic poll
 
   bool have_published_once_{false};
-  bool last_published_busy_{false};
+
+  // Command queues so we can be responsive
+  std::optional<AutoslideMode> queued_mode_{};
+  bool queued_trigger_{false};
+  bool queued_state_request_{false};
+  bool queued_publish_{true};
+
+  // Throttle warning prints when commands are blocked
+  bool block_warned_{false};
+
+  char inflight_key_{0};
+  int  inflight_value_{0};
 
   // Pointers to the ESPHome entities defined in YAML
   select::Select *mode_select_{nullptr};
@@ -217,7 +234,6 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   text_sensor::TextSensor *motion_state_sensor_{nullptr};
   text_sensor::TextSensor *lock_state_sensor_{nullptr};
   button::Button *open_button_{nullptr};
-  binary_sensor::BinarySensor *busy_sensor_{nullptr};
   binary_sensor::BinarySensor *connected_sensor_{nullptr};
 };
 
