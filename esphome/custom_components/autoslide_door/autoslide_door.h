@@ -160,8 +160,8 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   void dump_config() override;
 
   // Custom actions
-  void trigger_open();
-  void set_mode(const AutoslideMode& mode);
+  void trigger_open(const bool defer = false);
+  void set_mode(const AutoslideMode& mode, const bool defer = false);
   void request_all_settings();
 
   // send key/value update command to door opener
@@ -216,6 +216,7 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   bool queued_trigger_{false};
   bool queued_state_request_{false};
   bool queued_publish_{true};
+  bool queued_upsend_reply_{false};
 
   // Throttle warning prints when commands are blocked
   bool block_warned_{false};

@@ -82,7 +82,7 @@ async def to_code(config):
     if CONF_MODE_SELECT in config:
         sel = await select.new_select(
             config[CONF_MODE_SELECT],
-            options=["Auto", "Stack", "Lock", "Pet"],
+            options=["Auto", "Lock", "Pet", "Stack"],
         )
         cg.add(sel.set_parent(var))
         cg.add(var.set_mode_select(sel))

@@ -66,13 +66,13 @@ uart:
   tx_pin: GPIO4
   rx_pin: GPIO2
   baud_rate: 19200
-  debug:
-    direction: BOTH
-    dummy_receiver: false
-    after:
-      delimiter: "\n"
-    sequence:
-      - lambda: UARTDebug::log_string(direction, bytes);
+#  debug:
+#    direction: BOTH
+#    dummy_receiver: false
+#    after:
+#      delimiter: "\x1B"
+#    sequence:
+#      - lambda: UARTDebug::log_string(direction, bytes);
 
 autoslide_door:
   id: autoslide

@@ -101,7 +101,7 @@ void AutoslideDoor::loop()
   size_t bytes_read{0};
   size_t commands_received{0};
   uint8_t byte;
-  while (available() and bytes_read < 256 and commands_received < 1)
+  while (available() and bytes_read < 256 and commands_received < 2)
   {
     if (!read_byte(&byte))
     {
@@ -154,25 +154,41 @@ void AutoslideDoor::loop()
     }
   }
 
+  if (queued_upsend_reply_)
+  {
+    send_upsend_reply();
+    App.feed_wdt();  // let scheduler breathe after TX
+    return;          // do one heavy action per tick
+  }
+
   // handle queued commands if we aren't waiting on anything anymore
   if (!awaiting_result_from_update_)
   {
-    if (queued_publish_)
-    {
-      publish_current_state();
-    }
-    else if (queued_trigger_)
+    if (queued_trigger_)
     {
       trigger_open();
+      App.feed_wdt();
+      return;
     }
     else if (queued_mode_.has_value())
     {
       set_mode(queued_mode_.value());
+      App.feed_wdt();
+      return;
     }
     else if (queued_state_request_ or now - last_poll_time_ms_ >= POLL_INTERVAL_MS)
     {
       request_all_settings();
+      App.feed_wdt();
+      return;
     }
+  }
+
+  if (queued_publish_)
+  {
+    publish_current_state();
+    App.feed_wdt();
+    return;
   }
 
   // 4. Offline detection (no RX for a while)
@@ -185,12 +201,11 @@ void AutoslideDoor::loop()
       connected_sensor_->publish_state(false);
     }
   }
-
 }
 
-void AutoslideDoor::trigger_open()
+void AutoslideDoor::trigger_open(const bool defer)
 {
-  if (send_update_command('b', static_cast<int>(AutoslideTrigger::INDOOR)))
+  if (not defer and send_update_command('b', static_cast<int>(AutoslideTrigger::INDOOR)))
   {
     ESP_LOGD(TAG, "Sent Master Open Trigger (b:1)");
     queued_trigger_ = false;
@@ -202,9 +217,9 @@ void AutoslideDoor::trigger_open()
   }
 }
 
-void AutoslideDoor::set_mode(const AutoslideMode& mode)
+void AutoslideDoor::set_mode(const AutoslideMode& mode, const bool defer)
 {
-  if (send_update_command('a', static_cast<int>(mode)))
+  if (not defer and send_update_command('a', static_cast<int>(mode)))
   {
     ESP_LOGD(TAG, "Sent mode %s (%i)", mode_to_string(mode).c_str(), static_cast<int>(mode));
     queued_mode_ = {};
@@ -240,9 +255,18 @@ bool AutoslideDoor::send_update_command(char key, int value)
   command += std::to_string(value);
   command += (char) 0x1B; // Escape character
 
-  ESP_LOGD(TAG, "Sending command: %s", command.c_str());
+  std::string printable = command;
+  for (auto &ch : printable)
+  {
+      if (ch == 0x1B)
+      {
+          ch = '\\';
+      }
+  }
+  ESP_LOGD(TAG, "Sending command: %s", printable.c_str());
 
   write_str(command.c_str());
+  App.feed_wdt();
 
   const auto now_ms = esphome::millis();
   awaiting_result_from_update_ = true;
@@ -257,8 +281,18 @@ bool AutoslideDoor::send_update_command(char key, int value)
 void AutoslideDoor::send_upsend_reply()
 {
   const std::string command = "AT+REPLY,r:1" + std::string(1, 0x1B);
-  ESP_LOGD(TAG, "Sending UPSEND Reply: %s", command.c_str());
+  std::string printable = command;
+  for (auto &ch : printable)
+  {
+      if (ch == 0x1B)
+      {
+          ch = '\\';
+      }
+  }
+  ESP_LOGD(TAG, "Sending UPSEND Reply: %s", printable.c_str());
   write_str(command.c_str());
+  App.feed_wdt();
+  queued_upsend_reply_ = false;
 }
 
 void AutoslideDoor::request_all_settings()
@@ -267,8 +301,8 @@ void AutoslideDoor::request_all_settings()
   {
     ESP_LOGI(TAG, "Requesting all door settings (d:0)...");
     queued_state_request_ = false;
-    last_poll_time_ms_ = esphome::millis();
   }
+  last_poll_time_ms_ = esphome::millis();
 }
 
 void AutoslideDoor::handle_incoming_command(const std::string &command)
@@ -385,7 +419,7 @@ void AutoslideDoor::handle_upsend_command(const std::string &payload)
 {
   ESP_LOGD(TAG, "Received AT+UPSEND (Status Update) with payload: %s", payload.c_str());
 
-  send_upsend_reply();
+  queued_upsend_reply_ = true;
 
   std::stringstream ss(payload);
   std::string key_value_pair;
@@ -564,7 +598,7 @@ void AutoslideModeSelect::control(const std::string &value)
                value.c_str(),
                parent_->mode_to_string(mode_value).c_str());
 
-      parent_->set_mode(mode_value);
+      parent_->set_mode(mode_value, true);
   }
   else
   {
@@ -623,7 +657,7 @@ void AutoslideOnOffSwitch::write_state(bool value)
 void AutoslideOpenButton::press_action()
 {
   if (parent_ != nullptr)
-    parent_->trigger_open();
+    parent_->trigger_open(true);
   else
     ESP_LOGE(TAG, "Open button pressed but parent not set");
 }
