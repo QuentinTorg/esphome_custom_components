@@ -10,6 +10,7 @@
 #include "esphome/core/component.h"
 
 #include <optional>
+#include <cstdint>
 
 namespace esphome
 {
@@ -20,7 +21,6 @@ namespace autoslide_door
 
 enum class AutoslideTrigger
 {
-  UNKNOWN = -1,
   MASTER = 0,
   INDOOR = 1,
   PET = 2,
@@ -30,7 +30,6 @@ enum class AutoslideTrigger
 // Key 'a': Door Mode
 enum class AutoslideMode
 {
-  UNKNOWN = -1,
   AUTO = 0,
   STACK = 1,
   LOCK = 2,
@@ -40,7 +39,6 @@ enum class AutoslideMode
 // Key 'e': Open Speed (Slow/Fast)
 enum class AutoslideOpenSpeed
 {
-  UNKNOWN = -1,
   FAST = 0, // Maps to Switch OFF
   SLOW = 1, // Maps to Switch ON (Default behavior)
 };
@@ -48,7 +46,6 @@ enum class AutoslideOpenSpeed
 // Key 'g': Secure Pet Mode (Pet On/Pet Off)
 enum class AutoslideSecurePet
 {
-  UNKNOWN = -1,
   ON = 0,  // Maps to Switch OFF
   OFF = 1, // Maps to Switch ON (Default behavior)
 };
@@ -56,7 +53,6 @@ enum class AutoslideSecurePet
 // Key 'm': Motion State (Read-only)
 enum class AutoslideMotionState
 {
-  UNKNOWN = -1,
   STOPPED = 0,
   OPENING = 1,
   CLOSING = 2,
@@ -65,88 +61,70 @@ enum class AutoslideMotionState
 // Key 'c': Lock State (Read-only)
 enum class AutoslideLockedState
 {
-  UNKNOWN = -1,
   UNLOCKED = 0,
   LOCKED = 1,
+};
+
+// Key identifiers (backed by the protocol characters)
+enum class AutoslideKey : char
+{
+  NONE            = 0,   // null characer
+  MODE            = 'a',
+  LOCK_STATE      = 'c', // read-only
+  OPEN_SPEED      = 'e',
+  SECURE_PET      = 'g',
+  HOLD_TIME       = 'j',
+  OPEN_FORCE      = 'C',
+  CLOSE_FORCE     = 'z',
+  CLOSE_END_FORCE = 'A',
+  MOTION_STATE    = 'm', // read-only
+  MOTION_TRIGGER  = 'n', // read-only
+  TRIGGER         = 'b', // action
+  REQUEST_ALL     = 'd', // action (readback)
+  RESULT          = 'r', // meta
 };
 
 // --- State Struct ---
 
 struct AutoslideState
 {
-  AutoslideMode door_mode{AutoslideMode::LOCK};
-  AutoslideOpenSpeed open_speed{AutoslideOpenSpeed::FAST};
-  AutoslideSecurePet secure_pet{AutoslideSecurePet::ON};
-  uint8_t open_hold_duration{0}; // Key 'j' (0-25)
-  uint8_t open_force{0};         // Key 'C' (0-7)
-  uint8_t close_force{0};        // Key 'z' (0-7)
-  uint8_t close_end_force{0};    // Key 'A' (0-7)
+  AutoslideMode        door_mode{AutoslideMode::LOCK};
+  AutoslideOpenSpeed   open_speed{AutoslideOpenSpeed::FAST};
+  AutoslideSecurePet   secure_pet{AutoslideSecurePet::ON};
+  uint8_t              open_hold_duration{0}; // 'j' (0-25)
+  uint8_t              open_force{0};         // 'C' (0-7)
+  uint8_t              close_force{0};        // 'z' (0-7)
+  uint8_t              close_end_force{0};    // 'A' (0-7)
   AutoslideMotionState motion_state{AutoslideMotionState::STOPPED};
   AutoslideLockedState lock_state{AutoslideLockedState::LOCKED};
-  uint8_t motion_trigger{0};     // Key 'n' (Raw trigger value)
-  bool connected{false};
+  uint8_t              motion_trigger{0};     // 'n' (raw)
+  bool                 connected{false};
 };
 
-// Forward declaration of the main component class
-class AutoslideDoor;
-
-// --- Custom Control Implementations ---
-
-// Custom Select class for Door Mode ('a')
-class AutoslideModeSelect : public select::Select
-{
- public:
-  AutoslideModeSelect() = default;
-  explicit AutoslideModeSelect(AutoslideDoor *parent) : parent_(parent) {}
-  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
-  void control(const std::string &value) override;
-
- protected:
-  AutoslideDoor *parent_{nullptr};
+// --- Key descriptor for validation/formatting (constexpr table) ---
+struct KeyDescriptor {
+  AutoslideKey key{AautoslideKey::UNKNOWN};
+  bool         writable;
+  int16_t      min_v;
+  int16_t      max_v;
+  bool         zero_pad2; // for 'j'
 };
 
-// Custom Number class for Open Hold, Forces ('j', 'C', 'z', 'A')
-class AutoslideSettingNumber : public number::Number
-{
- public:
-  AutoslideSettingNumber() = default;
-  AutoslideSettingNumber(AutoslideDoor *parent, uint8_t key) : parent_(parent), key_((char) key) {}
-  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
-  void set_key(uint8_t key) { key_ = (char) key; }
-  void control(float value) override;
+static inline const KeyDesc* get_descriptor(const AutoslideKey key);
 
- protected:
-  AutoslideDoor *parent_{nullptr};
-  char key_{0};
-};
+struct InflightUpdate {
+    AutoslideKey key{AutoslideKey::UNKNOWN};
+    int value{-1};
+    uint32_t sent_time_ms{0};
+}
 
-// Custom Switch class for Open Speed and Secure Pet ('e', 'g')
-class AutoslideOnOffSwitch : public switch_::Switch
-{
- public:
-  AutoslideOnOffSwitch() = default;
-  AutoslideOnOffSwitch(AutoslideDoor *parent, uint8_t key) : parent_(parent), key_((char) key) {}
-  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
-  void set_key(uint8_t key) { key_ = (char) key; }
-  void write_state(bool value) override;
-
- protected:
-  AutoslideDoor *parent_{nullptr};
-  char key_{0};
-};
-
-class AutoslideOpenButton : public button::Button
-{
- public:
-  AutoslideOpenButton() = default;
-  explicit AutoslideOpenButton(AutoslideDoor *parent) : parent_(parent) {}
-  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
-
- protected:
-  void press_action() override;
-
-  AutoslideDoor *parent_{nullptr};
-};
+// Free utility functions for manipulating the types
+std::string mode_to_string(AutoslideMode mode);
+std::string motion_state_to_string(AutoslideMotionState state);
+bool speed_to_bool(const AutoslideOpenSpeed speed);
+AutoslideOpenSpeed bool_to_speed(const bool speed_bool);
+bool secure_pet_to_bool(const AutoslideSecurePet pet);
+AutoslideSecurePet bool_to_secure_pet(const bool pet_bool);
 
 // --- Main Component Class ---
 
@@ -159,31 +137,42 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   float get_setup_priority() const override;
   void dump_config() override;
 
-  // Custom actions
-  void trigger_open(const bool defer = false);
-  void set_mode(const AutoslideMode& mode, const bool defer = false);
-  void request_all_settings();
+  // High-level requests (do not write UART directly)
+  template <typename ValueT>
+  void request_set_key_value(const AutoslideKey key, const ValueT value)
+  {
+      const auto desc = get_descriptor(key);
+      if (desc == nullptr)
+      {
+          ESP_LOGE(TAG, "Exiting without sending request. Failed to get descriptor for key: %c", static_cast<char>(key));
+          return;
+      }
+      else if (not desc->writable)
+      {
+          ESP_LOGE(TAG, "Exiting without sending request. Key '%c' is not writable", static_cast<char>(key));
+          return;
+      }
 
-  // send key/value update command to door opener
-  bool send_update_command(char key, int value);
-  void send_upsend_reply();
+      for (auto& [possible_key, request_value] : open_requests_)
+      {
+          if (possible_key == key)
+          {
+              requested_value = std::clamp(static_cast<int>(native_value), desc->min_v, desc->max_v);
 
-  // handle all incoming commands from door opener
-  void handle_incoming_command(const std::string &command);
-  void handle_result_command(const std::string &payload);
-  void handle_upsend_command(const std::string &payload);
+              return;
+          }
+      }
 
-  // update internal state based on new key/value params
-  void update_state(const char key, const int value);
+      ESP_LOGE(TAG, "Failed to queue key value send for key: %c, value: %d", static_cast<char>(key), static_cast<int>(value))
+  }
+
+  //void request_mode(AutoslideMode mode);
+  //void request_trigger();
+  //void request_set_key_value(char key, int value);
+  //void request_all_settings();
 
   // publish current state to wifi devices/sensors
-  void publish_current_state(bool force = false);
-
-  // Utility functions
-  std::string mode_to_string(AutoslideMode mode) const;
-  std::string motion_state_to_string(AutoslideMotionState state) const;
-  bool speed_to_bool(AutoslideOpenSpeed speed) const;
-  bool secure_pet_to_bool(AutoslideSecurePet pet) const;
+  void publish_current_state(const bool full_publish);
 
   // ESPHome Configuration Setter Methods
   void set_mode_select(select::Select *select);
@@ -199,30 +188,54 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   void set_connected_sensor(binary_sensor::BinarySensor *sensor);
 
  protected:
+  // Internal: send a single AT+UPDATE or action; called only from loop reconcile
+  bool send_update_command(const AutoslideKey key, const int value);
+  void send_upsend_reply();
+
+  // handle incoming commands
+  void handle_incoming_command(const std::string &command);
+
+  // parse helpers
+  void parse_kv_payload(const char *payload, const size_t len);
+
+  // update internal state based on new key/value params
+  void update_state(const char key, const int value);
+
+  // --- Internal Data ---
+
+  // Current state and caches
   AutoslideState state_{};
   AutoslideState last_published_state_{};
+
+  // array serves as a map, char value casted to int is the location in the array
+  std::array<std::pair<AutoslideKey, std::optional<int>>, 9> open_requests_{
+      {
+      {AutoslideKey::REQUEST_ALL, {}},
+      {AutoslideKey::TRIGGER, {}},
+      {AutoslideKey::MODE, {}},
+      {AutoslideKey::OPEN_SPEED, {}},
+      {AutoslideKey::SECURE_PET, {}},
+      {AutoslideKey::HOLD_TIME, {}},
+      {AutoslideKey::OPEN_FORCE, {}},
+      {AutoslideKey::CLOSE_FORCE, {}},
+      {AutoslideKey::CLOSE_END_FORCE, {}},
+      };
+
+  // Serial parsing
   std::string receive_buffer_;
-  bool awaiting_result_from_update_{false};
-  uint32_t last_command_sent_time_ms_{0};
+
+  // TX bookkeeping
+  std::optional<InflightUpdate> inflight_update_{};
 
   // Connection health
-  uint32_t last_rx_time_ms_{0}; // last time we received any AT frame
+  uint32_t last_rx_time_ms_{0};   // last time we received any AT frame
   uint32_t last_poll_time_ms_{0}; // last time we sent a periodic poll
 
-  bool have_published_once_{false};
-
-  // Command queues so we can be responsive
-  std::optional<AutoslideMode> queued_mode_{};
-  bool queued_trigger_{false};
-  bool queued_state_request_{false};
-  bool queued_publish_{true};
-  bool queued_upsend_reply_{false};
-
-  // Throttle warning prints when commands are blocked
-  bool block_warned_{false};
-
-  char inflight_key_{0};
-  int  inflight_value_{0};
+//  bool have_published_once_{false};
+//
+//  // Command queues so we can be responsive
+  bool queued_publish_{true}; // publish only happens when it is queued
+  bool queued_upsend_reply_{false}; // must reply to every upsend from door
 
   // Pointers to the ESPHome entities defined in YAML
   select::Select *mode_select_{nullptr};
@@ -237,6 +250,62 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   button::Button *open_button_{nullptr};
   binary_sensor::BinarySensor *connected_sensor_{nullptr};
 };
+
+// --- Custom Control Implementations ---
+
+class AutoslideModeSelect : public select::Select
+{
+ public:
+  AutoslideModeSelect() = default;
+  explicit AutoslideModeSelect(AutoslideDoor *parent) : parent_(parent) {}
+  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
+  void control(const std::string &value) override;
+
+ protected:
+  AutoslideDoor *parent_{nullptr};
+};
+
+class AutoslideSettingNumber : public number::Number
+{
+ public:
+  AutoslideSettingNumber() = default;
+  AutoslideSettingNumber(AutoslideDoor *parent, const AutoslideKey key) : parent_(parent) , key_(key) { }
+  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
+  void set_key(const AutoslideKey key) { key_ = key; }
+  void control(float value) override;
+
+ protected:
+  AutoslideDoor *parent_{nullptr};
+  AutoslideKey key_{AutoslideKey::NONE};
+};
+
+class AutoslideOnOffSwitch : public switch_::Switch
+{
+ public:
+  AutoslideOnOffSwitch() = default;
+  AutoslideOnOffSwitch(AutoslideDoor *parent, const AutoslideKey key) : parent_(parent), key_(key) {}
+  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
+  void set_key(const AutoslideKey key) { key_ = key; }
+  void write_state(bool value) override;
+
+ protected:
+  AutoslideDoor *parent_{nullptr};
+  AutoslideKey key_{AutoslideKey::NONE};
+};
+
+class AutoslideOpenButton : public button::Button
+{
+ public:
+  AutoslideOpenButton() = default;
+  explicit AutoslideOpenButton(AutoslideDoor *parent) : parent_(parent) {}
+  void set_parent(AutoslideDoor *parent) { parent_ = parent; }
+
+ protected:
+  void press_action() override;
+
+  AutoslideDoor *parent_{nullptr};
+};
+
 
 } // namespace autoslide_door
 } // namespace esphome
