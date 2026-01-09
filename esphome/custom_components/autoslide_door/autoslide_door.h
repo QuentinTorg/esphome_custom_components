@@ -12,10 +12,10 @@
 #include <optional>
 #include <cstdint>
 
-namespace esphome
-{
-namespace autoslide_door
-{
+namespace esphome {
+namespace autoslide_door {
+
+static const char *const TAG = "autoslide_door";
 
 // --- Constants & Enums based on Autoslide Programmer's Guide ---
 
@@ -30,6 +30,7 @@ enum class AutoslideTrigger
 // Key 'a': Door Mode
 enum class AutoslideMode
 {
+  UNKNOWN = -1,
   AUTO = 0,
   STACK = 1,
   LOCK = 2,
@@ -101,22 +102,11 @@ struct AutoslideState
   bool                 connected{false};
 };
 
-// --- Key descriptor for validation/formatting (constexpr table) ---
-struct KeyDescriptor {
-  AutoslideKey key{AautoslideKey::UNKNOWN};
-  bool         writable;
-  int16_t      min_v;
-  int16_t      max_v;
-  bool         zero_pad2; // for 'j'
-};
-
-static inline const KeyDesc* get_descriptor(const AutoslideKey key);
-
 struct InflightUpdate {
-    AutoslideKey key{AutoslideKey::UNKNOWN};
+    AutoslideKey key{AutoslideKey::NONE};
     int value{-1};
     uint32_t sent_time_ms{0};
-}
+};
 
 // Free utility functions for manipulating the types
 std::string mode_to_string(AutoslideMode mode);
@@ -141,29 +131,16 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   template <typename ValueT>
   void request_set_key_value(const AutoslideKey key, const ValueT value)
   {
-      const auto desc = get_descriptor(key);
-      if (desc == nullptr)
-      {
-          ESP_LOGE(TAG, "Exiting without sending request. Failed to get descriptor for key: %c", static_cast<char>(key));
-          return;
-      }
-      else if (not desc->writable)
-      {
-          ESP_LOGE(TAG, "Exiting without sending request. Key '%c' is not writable", static_cast<char>(key));
-          return;
-      }
-
       for (auto& [possible_key, request_value] : open_requests_)
       {
           if (possible_key == key)
           {
-              requested_value = std::clamp(static_cast<int>(native_value), desc->min_v, desc->max_v);
-
+              request_value = static_cast<int>(value);
               return;
           }
       }
 
-      ESP_LOGE(TAG, "Failed to queue key value send for key: %c, value: %d", static_cast<char>(key), static_cast<int>(value))
+      ESP_LOGE(TAG, "Failed to queue key value send for key: %c, value: %d", static_cast<char>(key), static_cast<int>(value));
   }
 
   //void request_mode(AutoslideMode mode);
@@ -172,7 +149,7 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   //void request_all_settings();
 
   // publish current state to wifi devices/sensors
-  void publish_current_state(const bool full_publish);
+  bool publish_current_state(const bool full_publish = false);
 
   // ESPHome Configuration Setter Methods
   void set_mode_select(select::Select *select);
@@ -191,6 +168,7 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   // Internal: send a single AT+UPDATE or action; called only from loop reconcile
   bool send_update_command(const AutoslideKey key, const int value);
   void send_upsend_reply();
+  bool send_next_update();
 
   // handle incoming commands
   void handle_incoming_command(const std::string &command);
@@ -199,7 +177,7 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   void parse_kv_payload(const char *payload, const size_t len);
 
   // update internal state based on new key/value params
-  void update_state(const char key, const int value);
+  void update_state(const AutoslideKey key, const int value);
 
   // --- Internal Data ---
 
@@ -208,9 +186,8 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   AutoslideState last_published_state_{};
 
   // array serves as a map, char value casted to int is the location in the array
-  std::array<std::pair<AutoslideKey, std::optional<int>>, 9> open_requests_{
-      {
-      {AutoslideKey::REQUEST_ALL, {}},
+  // ordering is also command send priority
+  std::array<std::pair<AutoslideKey, std::optional<int>>, 9> open_requests_{{
       {AutoslideKey::TRIGGER, {}},
       {AutoslideKey::MODE, {}},
       {AutoslideKey::OPEN_SPEED, {}},
@@ -219,7 +196,8 @@ class AutoslideDoor : public Component, public uart::UARTDevice
       {AutoslideKey::OPEN_FORCE, {}},
       {AutoslideKey::CLOSE_FORCE, {}},
       {AutoslideKey::CLOSE_END_FORCE, {}},
-      };
+      {AutoslideKey::REQUEST_ALL, {}},
+  }};
 
   // Serial parsing
   std::string receive_buffer_;
@@ -271,7 +249,7 @@ class AutoslideSettingNumber : public number::Number
   AutoslideSettingNumber() = default;
   AutoslideSettingNumber(AutoslideDoor *parent, const AutoslideKey key) : parent_(parent) , key_(key) { }
   void set_parent(AutoslideDoor *parent) { parent_ = parent; }
-  void set_key(const AutoslideKey key) { key_ = key; }
+  void set_key(const char key) { key_ = static_cast<AutoslideKey>(key); }
   void control(float value) override;
 
  protected:
@@ -285,7 +263,7 @@ class AutoslideOnOffSwitch : public switch_::Switch
   AutoslideOnOffSwitch() = default;
   AutoslideOnOffSwitch(AutoslideDoor *parent, const AutoslideKey key) : parent_(parent), key_(key) {}
   void set_parent(AutoslideDoor *parent) { parent_ = parent; }
-  void set_key(const AutoslideKey key) { key_ = key; }
+  void set_key(const char key) { key_ = static_cast<AutoslideKey>(key); }
   void write_state(bool value) override;
 
  protected:

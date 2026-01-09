@@ -8,36 +8,9 @@
 namespace esphome {
 namespace autoslide_door {
 
-static const char *const TAG = "autoslide_door";
 static const uint32_t COMMAND_TIMEOUT_MS = 10000; // 10 s timeout with no response
 static const uint32_t POLL_INTERVAL_MS   = 10000; // 10 s periodic poll
 static const uint32_t OFFLINE_TIMEOUT_MS = 60000; // 60 s without RX => offline
-
-// Only writable settings are listed with constraints; read-only/action keys are omitted or marked non-writable
-static constexpr KeyDescriptor AUTOSLIDE_KEY_TABLE[] = {
-  { AutoslideKey::MODE,            true,  0, 3,  false },  // mode: 0..3
-  { AutoslideKey::OPEN_SPEED,      true,  0, 1,  false },  // open speed: 0..1
-  { AutoslideKey::SECURE_PET,      true,  0, 1,  false },  // secure pet: 0..1
-  { AutoslideKey::HOLD_TIME,       true,  0, 25, true  },  // open hold: use %02d (protocol requires 2 digits)
-  { AutoslideKey::OPEN_FORCE,      true,  0, 7,  false },  // forces 0..7
-  { AutoslideKey::CLOSE_FORCE,     true,  0, 7,  false },
-  { AutoslideKey::CLOSE_END_FORCE, true,  0, 7,  false },
-  { AutoslideKey::LOCK_STATE,      false, 0, 1,  false },
-  { AutoslideKey::MOTION_STATE,    false, 0, 2,  false },
-  { AutoslideKey::MOTION_TRIGGER,  false, 0, 5,  false },
-  { AutoslideKey::TRIGGER,         true,  1, 3,  false },
-  { AutoslideKey::REQUEST,         true,  0, 1,  false },
-  { AutoslideKey::RESULT,          false, 0, 1,  false },
-};
-
-static inline const KeyDesc* get_descriptor(const AutoslideKey key)
-{
-  for (const auto &descriptor : KEY_TABLE)
-  {
-    if (d.key == key) return &d;
-  }
-  return nullptr;
-}
 
 // --- Helper Functions for String Conversion (from .h) ---
 
@@ -80,6 +53,7 @@ bool secure_pet_to_bool(const AutoslideSecurePet pet)
 AutoslideSecurePet bool_to_secure_pet(const bool pet_bool)
 {
     return {pet_bool ? AutoslideSecurePet::OFF : AutoslideSecurePet::ON};
+}
 
 // --- AutoslideDoor Component Implementation ---
 
@@ -96,8 +70,8 @@ float AutoslideDoor::get_setup_priority() const { return setup_priority::BUS; }
 
 void AutoslideDoor::dump_config() {
   ESP_LOGCONFIG(TAG, "autoslide component");
-  ESP_LOGCONFIG(TAG, "  awaiting_result_from_update: %s", awaiting_updat_response_ ? "true" : "false");
-  ESP_LOGCONFIG(TAG, "  last_command_sent_time_ms: %u", last_command_sent_time_ms_);
+  ESP_LOGCONFIG(TAG, "  awaiting_result_from_update: %s", inflight_update_ ? "true" : "false");
+  ESP_LOGCONFIG(TAG, "  last_command_sent_time_ms: %u", inflight_update_ ? inflight_update_->sent_time_ms : 0);
   ESP_LOGCONFIG(TAG, "  now:                       %u", esphome::millis());
   ESP_LOGCONFIG(TAG, "  state:");
   ESP_LOGCONFIG(TAG, "    mode: %s", mode_to_string(state_.door_mode).c_str());
@@ -143,7 +117,7 @@ void AutoslideDoor::loop() {
   // 2) Handle Command Timeout
   if (inflight_update_ and now - inflight_update_->sent_time_ms > COMMAND_TIMEOUT_MS) {
       ESP_LOGE(TAG, "Command timeout! Did not receive AT+RESULT within %u ms.", COMMAND_TIMEOUT_MS);
-      inflight_update_ = {}
+      inflight_update_ = {};
       request_set_key_value(AutoslideKey::REQUEST_ALL, 0);
   }
 
@@ -156,11 +130,7 @@ void AutoslideDoor::loop() {
   // 4) Reconcile desired state -> send exactly one command if idle
   if (send_next_update())
   {
-      return;
-  }
-
-  if (now - last_poll_time_ms_ >= POLL_INTERVAL_MS) {
-      request_set_key_value(AutoslideKey::REQUEST_ALL, 0);
+    return; // one heavy action per tick
   }
 
   // 6) Publish if queued
@@ -177,6 +147,11 @@ void AutoslideDoor::loop() {
       connected_sensor_->publish_state(false);
     }
   }
+
+  if (now - last_poll_time_ms_ >= POLL_INTERVAL_MS) {
+      request_set_key_value(AutoslideKey::REQUEST_ALL, 0);
+  }
+
 }
 
 // --- High-level requests (never write UART directly from these) ---
@@ -222,8 +197,7 @@ bool AutoslideDoor::send_update_command(const AutoslideKey key, const int value)
 
   char cmd[32];
   int n;
-  const auto *desc = get_desc_for_key(key);
-  if (desc and desc->zero_pad2) {
+  if (key == AutoslideKey::HOLD_TIME) {
     n = snprintf(cmd, sizeof(cmd), "AT+UPDATE,%c:%02d%c", key, value, (char)0x1B);
   } else {
     n = snprintf(cmd, sizeof(cmd), "AT+UPDATE,%c:%d%c", key, value, (char)0x1B);
@@ -290,9 +264,9 @@ void AutoslideDoor::handle_incoming_command(const std::string &command)
 
   // pass payload to the handler
   if (command_type == "RESULT" or command_type == "UPSEND") {
-    ESP_LOGD(TAG, "Received AT+%s with payload: %.*s", command_type.c_str(), static_cast<int>(len), payload);
+    ESP_LOGD(TAG, "Received AT+%.*s with payload: %.*s", command_type, static_cast<int>(payload_len), payload_ptr);
 
-    parse_kv_payload(payload_ptr, len);
+    parse_kv_payload(payload_ptr, payload_len);
     if (command_type == "UPSEND")
     {
         queued_upsend_reply_ = true;
@@ -353,7 +327,9 @@ void AutoslideDoor::parse_kv_payload(const char *payload, const size_t len) {
     }
     value *= sign;
 
-    update_state(key, value);
+    ESP_LOGV(TAG, "Received key, value: %c:%d", key, value);
+
+    update_state(static_cast<AutoslideKey>(key), value);
 
     // move past comma
     i = (j < len) ? j + 1 : j;
@@ -392,13 +368,13 @@ void AutoslideDoor::update_state(const AutoslideKey key, const int value) {
                 ESP_LOGE(TAG, "Command failed to execute (r:%d).", value);
                 last_poll_time_ms_ = 0;
             }
-            inflight_update_ = {};
             break;
         }
     default:
       ESP_LOGW(TAG, "Received unknown key '%c' with value %d", key, value);
       return;
   }
+  inflight_update_ = {};
 }
 
 // bool AutoslideDoor::get_desired_value_for_key(char key, int &out_value) const {
@@ -415,7 +391,7 @@ void AutoslideDoor::update_state(const AutoslideKey key, const int value) {
 //   return true;
 // }
 
-bool send_next_update()
+bool AutoslideDoor::send_next_update()
 {
     if (inflight_update_)
     {
@@ -429,7 +405,7 @@ bool send_next_update()
             if (send_update_command(key, value_maybe.value()))
             {
                 value_maybe = {};
-                return true
+                return true;
             }
 
             return false;
@@ -440,33 +416,33 @@ bool send_next_update()
 }
 
 // Pick the next dirty key in a fixed priority order and send it
-bool AutoslideDoor::enqueue_next_desired_and_send() {
-  if (desired_dirty_mask_ == 0) return false;
-
-  // Priority order for deterministic behavior
-  const char order[] = { 'a','e','g','j','C','z','A' };
-  for (char key : order) {
-    if ((desired_dirty_mask_ & bit_for_key(key)) == 0) continue;
-    int value = 0;
-    if (!get_desired_value_for_key(key, value)) {
-      clear_dirty_for_key(key);
-      continue;
-    }
-    if (send_update_command(key, value)) {
-      // keep dirty until RESULT/UPSEND confirms it
-      return true;
-    } else {
-      // couldn't send (rare, since we check awaiting flag); keep dirty and try later
-      return false;
-    }
-  }
-  return false;
-}
+// bool AutoslideDoor::enqueue_next_desired_and_send() {
+//   if (desired_dirty_mask_ == 0) return false;
+//
+//   // Priority order for deterministic behavior
+//   const char order[] = { 'a','e','g','j','C','z','A' };
+//   for (char key : order) {
+//     if ((desired_dirty_mask_ & bit_for_key(key)) == 0) continue;
+//     int value = 0;
+//     if (!get_desired_value_for_key(key, value)) {
+//       clear_dirty_for_key(key);
+//       continue;
+//     }
+//     if (send_update_command(key, value)) {
+//       // keep dirty until RESULT/UPSEND confirms it
+//       return true;
+//     } else {
+//       // couldn't send (rare, since we check awaiting flag); keep dirty and try later
+//       return false;
+//     }
+//   }
+//   return false;
+// }
 
 // --- Publishing ---
 
 bool AutoslideDoor::publish_current_state(const bool full_publish) {
-  ESP_LOGV(TAG, "Publishing current state to ESPHome entities (full_publish=%s)...", full_publish ? "true" : "false");
+  // ESP_LOGV(TAG, "Publishing current state to ESPHome entities (full_publish=%s)...", full_publish ? "true" : "false");
 
   // only publish one element per fuction call unless force publish
 
@@ -474,7 +450,7 @@ bool AutoslideDoor::publish_current_state(const bool full_publish) {
   if (mode_select_ != nullptr) {
     if (full_publish || state_.door_mode != last_published_state_.door_mode) {
       mode_select_->publish_state(mode_to_string(state_.door_mode));
-      last_published_state_.door_moode = state_.door_mode;
+      last_published_state_.door_mode = state_.door_mode;
       if (not full_publish) { return true; }
     }
   }
@@ -604,14 +580,14 @@ void AutoslideModeSelect::control(const std::string &value) {
 
   if (mode_value != AutoslideMode::UNKNOWN && parent_ != nullptr) {
     ESP_LOGI(TAG, "Queueing mode request: %s", value.c_str());
-    parent_->request_mode(mode_value);
+    parent_->request_set_key_value(AutoslideKey::MODE, mode_value);
   } else {
     ESP_LOGE(TAG, "Invalid door mode selected or parent not set: %s", value.c_str());
   }
 }
 
 void AutoslideSettingNumber::control(float value) {
-  if (parent_ == nullptr || key_ == NONE) {
+  if (parent_ == nullptr || key_ == AutoslideKey::NONE) {
     ESP_LOGE(TAG, "Number control missing parent or key");
     return;
   }
@@ -634,7 +610,7 @@ void AutoslideOnOffSwitch::write_state(bool value) {
   }
   else if (key_ == AutoslideKey::SECURE_PET)
   {
-      parent_->request_set_key_value(bool_to_secure_pet(value));
+      parent_->request_set_key_value(key_, bool_to_secure_pet(value));
   }
   else
   {

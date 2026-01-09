@@ -66,6 +66,7 @@ uart:
   tx_pin: GPIO4
   rx_pin: GPIO2
   baud_rate: 19200
+  rx_buffer_size: 512
 #  debug:
 #    direction: BOTH
 #    dummy_receiver: false
