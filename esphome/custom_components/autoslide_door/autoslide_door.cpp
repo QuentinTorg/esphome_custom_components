@@ -8,8 +8,8 @@
 namespace esphome {
 namespace autoslide_door {
 
-static const uint32_t COMMAND_TIMEOUT_MS = 10000; // 1 s timeout with no response
-static const uint32_t POLL_INTERVAL_MS   = 10000; // 1 s periodic poll
+static const uint32_t COMMAND_TIMEOUT_MS = 1000; // 1 s timeout with no response
+static const uint32_t POLL_INTERVAL_MS   = 1000; // 1 s periodic poll
 static const uint32_t OFFLINE_TIMEOUT_MS = 10000; // 10 s without RX => offline
 
 // --- Helper Functions for String Conversion (from .h) ---

@@ -1,19 +1,19 @@
 # Basic ESPHome config
 esphome:
   name: esphome-autoslide-door
-  friendly_name: Autoslide Door Opener
+  friendly_name: Sliding Door
   min_version: 2025.10.0
   name_add_mac_suffix: false
 
 # Enable logging
 logger:
-  level: VERY_VERBOSE
-  #level: INFO
+  #level: VERY_VERBOSE
+  level: INFO
 
 # ESP32 Configuration
 esp32:
-  board: esp32-s3-devkitc-1
-  # variant: esp32c3
+  #variant: esp32s3
+  variant: esp32c3
   framework:
     type: esp-idf
 
@@ -38,50 +38,53 @@ api:
         args: ["client_info.c_str()", "client_address.c_str()"]
 
 # Allow Over-The-Air updates
-# https://esphome.io/components/ota/esphome.html#updating-the-password
 ota:
   - platform: esphome
     id: my_ota
     password: !secret ota_password
 
 # Custom Component Definition
-# Points ESPHome to your local custom_components folder
-external_components:
-  - source:
-      type: local
-      path: custom_components
-    components: [ autoslide_door ]
-
-# use this external component in home assistant
+# Points ESPHome to your local custom_components folder for dev work
 # external_components:
 #   - source:
-#       type: git
-#       url: https://github.com/QuentinTorg/esphome_custom_components
-#       ref: dev
-#       path: esphome/custom_components
+#       type: local
+#       path: custom_components
 #     components: [ autoslide_door ]
-#     refresh: 60s
+
+# Use this external component in home assistant
+external_components:
+  - source:
+      type: git
+      url: https://github.com/QuentinTorg/esphome_custom_components
+      ref: dev
+      path: esphome/custom_components
+    components: [ autoslide_door ]
+    #refresh: 60s
 
 uart:
   id: autoslide_uart
-  tx_pin: GPIO4
-  rx_pin: GPIO2
+  # tx_pin: GPIO4 # s3 version
+  # rx_pin: GPIO2 # s3 version
+  # tx_pin: GPIO17 # wroom version
+  # rx_pin: GPIO16 # wroom version
+  tx_pin: GPIO6 # c3 version
+  rx_pin: GPIO5 # c3 version
   baud_rate: 19200
   rx_buffer_size: 512
-  debug:
-    direction: BOTH
-    dummy_receiver: false
-    after:
-      delimiter: "\x1B"
-    sequence:
-      - lambda: UARTDebug::log_string(direction, bytes);
+#  debug:
+#    direction: BOTH
+#    dummy_receiver: false
+#    after:
+#      delimiter: "\x1B"
+#    sequence:
+#      - lambda: UARTDebug::log_string(direction, bytes);
 
 autoslide_door:
   id: autoslide
   uart_id: autoslide_uart
 
   mode_select:
-    name: "Door Mode"
+    name: "Mode"
 
   open_speed_switch:
     name: "Open Speed Slow"
@@ -103,21 +106,22 @@ autoslide_door:
     name: "Close End Force"
 
   open_button:
-    name: "Open Door"
+    name: "Open"
 
   motion_state:
-    name: "Door Motion State"
+    name: "Motion State"
 
   lock_state:
-    name: "Door Lock State"
+    name: "Lock State"
 
   connected:
-    name: "Door Connected"
+    name: "Connected"
     device_class: connectivity
 
 binary_sensor:
   - platform: gpio
     pin:
-      number: GPIO5
+      #number: GPIO5 # used for s3 board
+      number: GPIO7 # used for c3 board
       inverted: true
     name: "Pet Trigger Request"
