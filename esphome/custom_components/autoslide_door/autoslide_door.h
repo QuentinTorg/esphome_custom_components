@@ -122,10 +122,10 @@ class AutoslideDoor : public Component, public uart::UARTDevice
 {
  public:
   // Component lifecycle methods
-  void setup() override;
-  void loop() override;
   float get_setup_priority() const override;
   void dump_config() override;
+  void setup() override;
+  void loop() override;
 
   // High-level requests (do not write UART directly)
   template <typename ValueT>
@@ -142,11 +142,6 @@ class AutoslideDoor : public Component, public uart::UARTDevice
 
       ESP_LOGE(TAG, "Failed to queue key value send for key: %c, value: %d", static_cast<char>(key), static_cast<int>(value));
   }
-
-  //void request_mode(AutoslideMode mode);
-  //void request_trigger();
-  //void request_set_key_value(char key, int value);
-  //void request_all_settings();
 
   // publish current state to wifi devices/sensors
   bool publish_current_state(const bool full_publish = false);
@@ -212,7 +207,6 @@ class AutoslideDoor : public Component, public uart::UARTDevice
 //  bool have_published_once_{false};
 //
 //  // Command queues so we can be responsive
-  bool queued_publish_{true}; // publish only happens when it is queued
   bool queued_upsend_reply_{false}; // must reply to every upsend from door
 
   // Pointers to the ESPHome entities defined in YAML

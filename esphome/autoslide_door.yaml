@@ -13,6 +13,7 @@ logger:
 # ESP32 Configuration
 esp32:
   board: esp32-s3-devkitc-1
+  # variant: esp32c3
   framework:
     type: esp-idf
 
@@ -67,13 +68,13 @@ uart:
   rx_pin: GPIO2
   baud_rate: 19200
   rx_buffer_size: 512
-#  debug:
-#    direction: BOTH
-#    dummy_receiver: false
-#    after:
-#      delimiter: "\x1B"
-#    sequence:
-#      - lambda: UARTDebug::log_string(direction, bytes);
+  debug:
+    direction: BOTH
+    dummy_receiver: false
+    after:
+      delimiter: "\x1B"
+    sequence:
+      - lambda: UARTDebug::log_string(direction, bytes);
 
 autoslide_door:
   id: autoslide
