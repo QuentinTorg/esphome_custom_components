@@ -1,0 +1,31 @@
+# see https://github.com/QuentinTorg/esphome_custom_components for source of truth
+
+substitutions:
+  comment: ""
+  device_name: unspecified devicename
+  friendly_name: "Unspecified Friendly Name"
+
+esphome:
+  name: $device_name
+  friendly_name: "${friendly_name}"
+  comment: "${comment}"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  min_auth_mode: WPA2
+  ap:
+    ssid: AP_${device_name}
+    password: !secret recovery_ap_password
+captive_portal:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+# Allow Over-The-Air updates
+ota:
+  - platform: esphome
+    id: my_ota
+    password: !secret ota_password
