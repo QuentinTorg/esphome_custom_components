@@ -1,0 +1,42 @@
+# see https://github.com/QuentinTorg/esphome_custom_components for source of truth
+
+substitutions:
+  device_name: unspecified-feit-dimmer
+  friendly_name: "Unspecified Feit Dimmer Friendly Name"
+
+  min_brightness: '0'
+  max_brightness: '1000'
+
+packages:
+  base_config: !include
+    file: package.base_config.yaml
+    vars:
+      device_name: "${device_name}"
+      friendly_name: "${friendly_name}"
+      comment: "${friendly_name} ESPHome Feit Dimmer"
+
+# Feit dimmer uses esp8285 chip internally
+esp8266:
+  board: esp8285
+
+# disable serial logging by setting baud_rate to 0 because baud_rate/serial connection is used by tuyamcu
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+uart:
+  id: tuya_uart
+  rx_pin: GPIO3
+  tx_pin: GPIO1
+  baud_rate: 9600
+
+tuya:
+  uart_id: tuya_uart
+
+light:
+  - platform: "tuya"
+    name: "${friendly_name}"
+    dimmer_datapoint: 2
+    switch_datapoint: 1
+    min_value: $min_brightness
+    max_value: $max_brightness
