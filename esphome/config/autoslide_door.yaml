@@ -37,7 +37,7 @@ logger:
 # external_components:
 #   - source:
 #       type: local
-#       path: custom_components
+#       path: ../custom_components
 #     components: [ autoslide_door ]
 
 # Use this external component in home assistant
