@@ -59,7 +59,6 @@ uart:
   tx_pin: GPIO6 # c3 version
   rx_pin: GPIO5 # c3 version
   baud_rate: 19200
-  rx_buffer_size: 512
 #  debug:
 #    direction: BOTH
 #    dummy_receiver: false
