@@ -8,4 +8,4 @@ packages:
       friendly_name: Upstairs Bathroom Dimmer
       restore_default_brightness: 'true'
       auto_off_enabled: 'true'
-      auto_off_delay: 45m
+      auto_off_delay: 45min
