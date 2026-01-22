@@ -5,7 +5,7 @@ packages:
     file: package.feit_dimmer.yaml
     vars:
       device_name: master-bathroom-dimmer
-      friendly_name: Master Bathroom Dimmer
+      friendly_name: Master Bathroom
       restore_default_brightness: 'true'
       auto_off_enabled: 'true'
       auto_off_delay: 45min

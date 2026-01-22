@@ -4,8 +4,7 @@ packages:
   base_config: !include
     file: package.feit_dimmer.yaml
     vars:
-      device_name: upstairs-bathroom-sink-dimmer
-      friendly_name: Upstairs Bathroom Sink
+      device_name: guest-bedroom-dimmer
+      friendly_name: Guest Bedroom
       restore_default_brightness: 'true'
-      auto_off_enabled: 'true'
-      auto_off_delay: 45min
+      linked_ha_outlet_entity_id: switch.guest_bedroom_light

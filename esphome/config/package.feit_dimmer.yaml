@@ -17,6 +17,8 @@ substitutions:
   auto_off_enabled: 'false'
   auto_off_delay: 40min
 
+  linked_ha_outlet_entity_id: unspecified
+
 
 packages:
   base_config: !include
@@ -48,7 +50,7 @@ tuya:
 light:
   - platform: "tuya"
     id: feit_dimmer
-    name: "${friendly_name}"
+    name: "Dimmer"
     dimmer_datapoint: 2
     switch_datapoint: 1
     min_value: $min_brightness
@@ -67,9 +69,31 @@ light:
               lambda: 'return ${auto_off_enabled};'
             then:
               - script.execute: feit_auto_off_timer
+        - if:
+            condition:
+              and:
+                - lambda: 'return (strcmp("${linked_ha_outlet_entity_id}", "unspecified") != 0);'
+                - api.connected
+            then:
+              - logger.log: "Triggering home assistant switch on: ${linked_ha_outlet_entity_id}"
+              - homeassistant.service:
+                  service: homeassistant.turn_on # works for switch/light domains
+                  data:
+                    entity_id: $linked_ha_outlet_entity_id
     on_turn_off:
       then:
         - script.stop: feit_auto_off_timer
+        - if:
+            condition:
+              and:
+                - lambda: 'return (strcmp("${linked_ha_outlet_entity_id}", "unspecified") != 0);'
+                - api.connected
+            then:
+              - logger.log: "Triggering home assistant switch off: ${linked_ha_outlet_entity_id}"
+              - homeassistant.service:
+                  service: homeassistant.turn_off # works for switch/light domains
+                  data:
+                    entity_id: $linked_ha_outlet_entity_id
 
 script:
   - id: feit_auto_off_timer
@@ -77,4 +101,3 @@ script:
     then:
       - delay: $auto_off_delay
       - light.turn_off: feit_dimmer
-

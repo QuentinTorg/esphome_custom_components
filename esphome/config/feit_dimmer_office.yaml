@@ -5,5 +5,6 @@ packages:
     file: package.feit_dimmer.yaml
     vars:
       device_name: office-dimmer
-      friendly_name: Office Dimmer
+      friendly_name: Office
       restore_default_brightness: 'true'
+      linked_ha_outlet_entity_id: switch.office_light
