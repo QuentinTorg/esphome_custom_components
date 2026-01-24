@@ -4,8 +4,6 @@ packages:
   base_config: !include
     file: package.feit_dimmer.yaml
     vars:
-      device_name: driveway-dimmer
-      friendly_name: Driveway
+      device_name: kitchen-dimmer
+      friendly_name: Kitchen
       restore_default_brightness: 'true'
-      default_brightness: 20%
-      enable_sunset_sunrise_trigger: 'true'
