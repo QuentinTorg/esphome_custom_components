@@ -1,0 +1,10 @@
+# see https://github.com/QuentinTorg/esphome_custom_components for source of truth
+
+packages:
+  base_config: !include
+    file: package.feit_dimmer.yaml
+    vars:
+      device_name: downstairs-bathroom-dimmer
+      friendly_name: Downstairs Bathroom
+      restore_default_brightness: 'true'
+      auto_off_enabled: 'true'

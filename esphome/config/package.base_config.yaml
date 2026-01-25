@@ -29,4 +29,3 @@ ota:
   - platform: esphome
     id: my_ota
     password: !secret ota_password
-

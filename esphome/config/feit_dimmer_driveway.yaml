@@ -8,4 +8,18 @@ packages:
       friendly_name: Driveway
       restore_default_brightness: 'true'
       default_brightness: 20%
-      enable_sunset_sunrise_trigger: 'true'
+
+time:
+  - platform: homeassistant # Works standalone without HA (requires internet)
+    id: ha_time
+
+sun:
+  time_id: ha_time
+  latitude: !secret location_latitude
+  longitude: !secret location_longitude
+  on_sunset:
+    then:
+      - light.turn_on: feit_dimmer
+  on_sunrise:
+    then:
+      - light.turn_off: feit_dimmer

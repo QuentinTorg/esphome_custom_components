@@ -1,0 +1,8 @@
+# see https://github.com/QuentinTorg/esphome_custom_components for source of truth
+
+packages:
+  base_config: !include
+    file: package.feit_dimmer.yaml
+    vars:
+      device_name: upstairs-hallway-dimmer
+      friendly_name: Upstairs Hallway

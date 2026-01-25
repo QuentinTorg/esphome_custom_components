@@ -4,7 +4,7 @@ substitutions:
   device_name: unspecified-feit-dimmer
   friendly_name: "Unspecified Feit Dimmer Friendly Name"
 
-  min_brightness: '0'
+  min_brightness: '10'
   max_brightness: '1000'
 
   # every time the light turns on, it will be restored to default
@@ -18,10 +18,6 @@ substitutions:
   auto_off_delay: 40min
 
   linked_ha_outlet_entity_id: unspecified
-
-  # automatically turn on the light at sunset and off at sunrise
-  # must pass true/false as strings
-  enable_sunset_sunrise_trigger: 'false'
 
 
 packages:
@@ -47,29 +43,6 @@ uart:
   rx_pin: GPIO3
   tx_pin: GPIO1
   baud_rate: 9600
-
-    #time:
-    #  - platform: sntp # Works standalone without HA (requires internet)
-    #    id: sys_time
-    #
-    #sun:
-    #  time_id: sys_time
-    #  latitude: !secret location_latitude
-    #  longitude: !secret location_longitude
-    #  on_sunset:
-    #    then:
-    #      - if:
-    #          condition:
-    #            lambda: 'return ${enable_sunset_sunrise_trigger};'
-    #          then:
-    #            - light.turn_on: feit_dimmer
-    #  on_sunrise:
-    #    then:
-    #      - if:
-    #          condition:
-    #            lambda: 'return ${enable_sunset_sunrise_trigger};'
-    #          then:
-    #            - light.turn_off: feit_dimmer
 
 tuya:
   uart_id: tuya_uart
@@ -128,4 +101,3 @@ script:
     then:
       - delay: $auto_off_delay
       - light.turn_off: feit_dimmer
-
