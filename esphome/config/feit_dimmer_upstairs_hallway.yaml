@@ -1,8 +1,30 @@
 # see https://github.com/QuentinTorg/esphome_custom_components for source of truth
+#
+#esp8266:
+#  board: esp8285
+#captive_portal: !remove
+#api:
+#  encryption: !remove
+#packages:
+#  feit_dimmer: !include
+#    file: package.base_config.yaml
+#    vars:
+#      device_name: upstairs-hallway-dimmer
+#      friendly_name: Upstairs Hallway
+#
+
+
 
 packages:
-  base_config: !include
+  feit_dimmer: !include
     file: package.feit_dimmer.yaml
     vars:
       device_name: upstairs-hallway-dimmer
       friendly_name: Upstairs Hallway
+
+  # there isn't enough space to flash with webserver back to back
+  # flash without webserver once, then again with webserver to update
+  #  http_switch_sync: !include
+  #    file: package.http_switch_sync.yaml
+  #    vars:
+  #      peer_device_name: upstairs-hallway-slave-dimmer

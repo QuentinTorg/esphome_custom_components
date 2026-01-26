@@ -1,0 +1,86 @@
+substitutions:
+  peer_device_name: unspecified-peer-hostname
+
+web_server:
+  port: 80
+  ota: false
+  # auth:
+  #   username: !secret web_user
+  #   password: !secret web_pass
+
+http_request:
+  id: switch_mirror_http_request
+  esp8266_disable_ssl_support: true
+  timeout: 5s
+  useragent: "esphome-switch-mirror/1.0"
+
+esphome:
+  on_boot:
+    - priority: -100
+      then:
+        - delay: 2s
+        - script.execute: mirror_to_peer
+
+binary_sensor:
+  - platform: template
+    id: local_on_state
+    internal: true
+    lambda: |-
+      return id(feit_dimmer).remote_values.is_on();
+    on_press:
+      - script.execute: mirror_to_peer
+    on_release:
+      - script.execute: mirror_to_peer
+
+sensor:
+  - platform: template
+    id: local_brightness_percent
+    internal: true
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    lambda: |-
+      return roundf(id(feit_dimmer).remote_values.get_brightness() * 100.0f);
+    update_interval: 150ms
+    filters:
+      - delta: 1.0
+      - throttle: 200ms
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return id(feit_dimmer).remote_values.is_on();'
+            then:
+              - script.execute: mirror_to_peer
+
+script:
+  - id: mirror_to_peer
+    mode: queued
+    then:
+      - if:
+          condition:
+            lambda: 'return id(feit_dimmer).remote_values.is_on();'
+          then:
+            - http_request.post:
+                # Uses the single http_request client defined above.
+                url: !lambda |-
+                  const int br = (int) roundf(id(feit_dimmer).remote_values.get_brightness() * 100.0f);
+                  return str_sprintf("http://${peer_device_name}.local/light/dimmer/turn_on?brightness=%d", br);
+                # headers:
+                #   Authorization: !lambda |-
+                #     return "Basic " + base64::encode(std::string("user:pass"));
+          else:
+            - http_request.post:
+                url: "http://${peer_device_name}.local/light/dimmer/turn_off"
+                  #- lambda: |-
+                  #    const bool on = id(feit_dimmer).remote_values.is_on();
+                  #    const int br = (int) roundf(id(feit_dimmer).remote_values.get_brightness() * 100.0f);
+                  #    std::string url = "http://${peer_hostname}/light/feit_dimmer/";
+                  #    if (on)
+                  #    {
+                  #      url += "turn_on?brightness=" + to_string(br);
+                  #    }
+                  #    else
+                  #    {
+                  #      url += "turn_off";
+                  #    }
+                  #    id(switch_mirror_http_request).send(http_request::RequestMethod::METHOD_GET, url);
