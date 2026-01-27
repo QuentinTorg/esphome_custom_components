@@ -1,5 +1,10 @@
 # see https://github.com/QuentinTorg/esphome_custom_components for source of truth
 
+substitutions:
+  table_outlet: switch.living_room_table_lamp
+  floor_outlet: switch.living_room_floor_lamp
+  couch_outlet: switch.living_room_couch_lamp
+
 packages:
   base_config: !include
     file: package.feit_dimmer.yaml
@@ -10,3 +15,187 @@ packages:
 light:
   - id: !extend feit_dimmer
     name: "Controller"
+    on_turn_off:
+      then:
+        - if:
+            condition:
+              - api.connected
+            then:
+              - script.execute: disable_outlets
+    on_turn_on:
+      then:
+        - if:
+            condition:
+              - api.connected
+            then:
+              - script.execute:
+                  id: enable_outlets
+                  current_brightness: !lambda 'return id(feit_dimmer).remote_values.get_brightness();'
+
+# make a template sensor that tracks the brightness level
+sensor:
+  - platform: template
+    id: local_brightness_percent
+    internal: true
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    lambda: |-
+      return roundf(id(feit_dimmer).remote_values.get_brightness() * 100.0f);
+    update_interval: 50ms
+    filters:
+      - delta: 1.0
+      - throttle: 200ms
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return id(feit_dimmer).remote_values.is_on();'
+            then:
+              - script.execute:
+                  id: enable_outlets
+                  current_brightness: !lambda 'return id(feit_dimmer).remote_values.get_brightness();'
+
+script:
+  - id: disable_outlets
+    mode: restart
+    then:
+      - logger.log: "Turning off all linked outlets"
+      - homeassistant.service:
+          service: homeassistant.turn_off
+          data:
+            entity_id: $table_outlet
+      - homeassistant.service:
+          service: homeassistant.turn_off
+          data:
+            entity_id: $floor_outlet
+      - homeassistant.service:
+          service: homeassistant.turn_off
+          data:
+            entity_id: $couch_outlet
+  - id: enable_outlets
+    mode: restart
+    parameters:
+      current_brightness: float
+    then:
+      - logger.log:
+          format: "brightness when enabling: %.2f"
+          args: [current_brightness]
+      - if:
+          condition:
+            lambda: 'return current_brightness <= .13;'
+          then:
+            - logger.log: "Setting outlet scene 1"
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $table_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_off
+                data:
+                  entity_id: $floor_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_off
+                data:
+                  entity_id: $couch_outlet
+      - if:
+          condition:
+            lambda: 'return current_brightness > .13 and current_brightness <= .28;'
+          then:
+            - logger.log: "Setting outlet scene 2"
+            - homeassistant.service:
+                service: homeassistant.turn_off
+                data:
+                  entity_id: $table_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $floor_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_off
+                data:
+                  entity_id: $couch_outlet
+      - if:
+          condition:
+            lambda: 'return current_brightness > .28 and current_brightness <= .43;'
+          then:
+            - logger.log: "Setting outlet scene 3"
+            - homeassistant.service:
+                service: homeassistant.turn_off
+                data:
+                  entity_id: $table_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_off
+                data:
+                  entity_id: $floor_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $couch_outlet
+      - if:
+          condition:
+            lambda: 'return current_brightness > .43 and current_brightness <= .58;'
+          then:
+            - logger.log: "Setting outlet scene 4"
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $table_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $floor_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_off
+                data:
+                  entity_id: $couch_outlet
+      - if:
+          condition:
+            lambda: 'return current_brightness > .58 and current_brightness <= .73;'
+          then:
+            - logger.log: "Setting outlet scene 5"
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $table_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_off
+                data:
+                  entity_id: $floor_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $couch_outlet
+      - if:
+          condition:
+            lambda: 'return current_brightness > .73 and current_brightness <= .90;'
+          then:
+            - logger.log: "Setting outlet scene 6"
+            - homeassistant.service:
+                service: homeassistant.turn_off
+                data:
+                  entity_id: $table_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $floor_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $couch_outlet
+      - if:
+          condition:
+            lambda: 'return current_brightness > .90;'
+          then:
+            - logger.log: "Setting outlet scene 7"
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $table_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $floor_outlet
+            - homeassistant.service:
+                service: homeassistant.turn_on
+                data:
+                  entity_id: $couch_outlet
