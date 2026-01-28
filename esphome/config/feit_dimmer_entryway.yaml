@@ -1,0 +1,11 @@
+# see https://github.com/QuentinTorg/esphome_custom_components for source of truth
+
+packages:
+  feit_dimmer: !include
+    file: package.feit_dimmer.yaml
+    vars:
+      device_name: entryway-dimmer
+      friendly_name: Entryway
+      restore_default_brightness: 'true'
+      auto_off_enabled: 'true'
+      auto_off_delay: 30min
