@@ -203,10 +203,12 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   // Connection health
   uint32_t last_rx_time_ms_{0};   // last time we received any AT frame
   uint32_t last_poll_time_ms_{0}; // last time we sent a periodic poll
+  uint32_t first_poll_complete_{false}; // used to initiate immediate first poll
 
-//  bool have_published_once_{false};
-//
-//  // Command queues so we can be responsive
+  // when is it okay to send commands even if door never sent first command
+  // stamp set to 0 when first command arrives
+  uint32_t startup_timeout_stamp_ms{25000};
+
   bool queued_upsend_reply_{false}; // must reply to every upsend from door
 
   // Pointers to the ESPHome entities defined in YAML
