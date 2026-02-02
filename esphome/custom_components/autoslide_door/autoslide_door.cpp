@@ -9,8 +9,9 @@ namespace esphome {
 namespace autoslide_door {
 
 static const uint32_t COMMAND_TIMEOUT_MS = 5000;   // 5 s timeout with no response
-static const uint32_t POLL_INTERVAL_MS   = 60000;  // 60 s periodic poll
-static const uint32_t OFFLINE_TIMEOUT_MS = 120000; // 120 s without RX => offline
+static const uint32_t POLL_INTERVAL_MS   = 300000;  // 5 m periodic poll just in case
+static const uint32_t OFFLINE_TIMEOUT_MS = 2.1 * POLL_INTERVAL_MS; // 2 missed polls indicate timeout
+static const uint32_t STARTUP_DELAY_MS = 25000; // 15 s delay on startup waiting for first command
 
 // --- Helper Functions for String Conversion (from .h) ---
 
@@ -89,8 +90,8 @@ void AutoslideDoor::setup()
 
   receive_buffer_.reserve(256);
 
-  // now that we have everything set up, publisht he current state
-  publish_current_state(true);
+  // don't send commands until first command arrives or startup delay completes
+  startup_timeout_stamp_ms = millis() + STARTUP_DELAY_MS;
 }
 
 void AutoslideDoor::loop()
@@ -131,10 +132,17 @@ void AutoslideDoor::loop()
     }
   }
 
-  const auto now = esphome::millis();
+  const auto now_ms = esphome::millis();
+
+  // wait for door to send first command before sending any updates.
+  // If we reach timeout, assume the door is already running
+  if (now_ms < startup_timeout_stamp_ms)
+  {
+      return;
+  }
 
   // 2) Handle Command Timeout
-  if (inflight_update_ and now - inflight_update_->sent_time_ms > COMMAND_TIMEOUT_MS)
+  if (inflight_update_ and now_ms - inflight_update_->sent_time_ms > COMMAND_TIMEOUT_MS)
   {
     ESP_LOGE(TAG, "Command timeout! Did not receive AT+RESULT within %u ms.", COMMAND_TIMEOUT_MS);
     inflight_update_.reset();
@@ -155,16 +163,17 @@ void AutoslideDoor::loop()
   }
 
   // 5) Offline detection
-  if (state_.connected && last_rx_time_ms_ != 0 && (now - last_rx_time_ms_ >= OFFLINE_TIMEOUT_MS))
+  if (state_.connected && last_rx_time_ms_ != 0 && (now_ms - last_rx_time_ms_ >= OFFLINE_TIMEOUT_MS))
   {
     ESP_LOGW(TAG, "No UART activity for %u ms, marking Autoslide disconnected.", OFFLINE_TIMEOUT_MS);
     state_.connected = false;
   }
 
   // 6) Request setting update
-  if (now - last_poll_time_ms_ >= POLL_INTERVAL_MS)
+  if (not first_poll_complete_ or now_ms - last_poll_time_ms_ >= POLL_INTERVAL_MS)
   {
     request_set_key_value(AutoslideKey::REQUEST_ALL, 0);
+    first_poll_complete_ = true;
   }
 
   // 7) Publish current state if we make it this far
@@ -440,6 +449,7 @@ void AutoslideDoor::handle_incoming_command(const std::string &command)
   {
     parse_kv_payload(payload_ptr, payload_len);
     queued_upsend_reply_ = true;
+    startup_timeout_stamp_ms = 0; // first upsend means door is ready to receive commands
   }
   else if (command_type == "REPLY")
   {
