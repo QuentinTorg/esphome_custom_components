@@ -159,6 +159,9 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   void set_open_button(button::Button *button);
   void set_connected_sensor(binary_sensor::BinarySensor *sensor);
 
+  // temporary debug sensor
+  void set_debug_uart_sensor(text_sensor::TextSensor *sensor) { debug_uart_sensor_ = sensor; }
+
  protected:
   // Internal: send a single AT+UPDATE or action; called only from loop reconcile
   bool send_update_command(const AutoslideKey key, const int value);
@@ -178,7 +181,6 @@ class AutoslideDoor : public Component, public uart::UARTDevice
 
   // Current state and caches
   AutoslideState state_{};
-  AutoslideState last_published_state_{};
 
   // array serves as a map, char value casted to int is the location in the array
   // ordering is also command send priority
@@ -203,7 +205,7 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   // Connection health
   uint32_t last_rx_time_ms_{0};   // last time we received any AT frame
   uint32_t last_poll_time_ms_{0}; // last time we sent a periodic poll
-  uint32_t first_poll_complete_{false}; // used to initiate immediate first poll
+  bool first_poll_complete_{false}; // used to initiate immediate first poll
 
   // when is it okay to send commands even if door never sent first command
   // stamp set to 0 when first command arrives
@@ -223,6 +225,7 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   text_sensor::TextSensor *lock_state_sensor_{nullptr};
   button::Button *open_button_{nullptr};
   binary_sensor::BinarySensor *connected_sensor_{nullptr};
+  text_sensor::TextSensor *debug_uart_sensor_{nullptr};
 };
 
 // --- Custom Control Implementations ---

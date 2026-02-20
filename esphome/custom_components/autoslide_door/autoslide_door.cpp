@@ -8,10 +8,10 @@
 namespace esphome {
 namespace autoslide_door {
 
-static const uint32_t COMMAND_TIMEOUT_MS = 5000;   // 5 s timeout with no response
-static const uint32_t POLL_INTERVAL_MS   = 300000;  // 5 m periodic poll just in case
+static const uint32_t COMMAND_TIMEOUT_MS = 5000;   // timeout with no response
+static const uint32_t POLL_INTERVAL_MS   = 60000;  // periodic poll just in case
 static const uint32_t OFFLINE_TIMEOUT_MS = 2.1 * POLL_INTERVAL_MS; // 2 missed polls indicate timeout
-static const uint32_t STARTUP_DELAY_MS = 25000; // 15 s delay on startup waiting for first command
+static const uint32_t STARTUP_DELAY_MS = 25000; // delay on startup waiting for first command
 
 // --- Helper Functions for String Conversion (from .h) ---
 
@@ -110,6 +110,12 @@ void AutoslideDoor::loop()
 
     if (byte == 0x1B) // Escape terminator
     {
+      // Temporary debug sensor
+      if (debug_uart_sensor_ != nullptr)
+      {
+        debug_uart_sensor_->publish_state(receive_buffer_);
+      }
+
       if (!receive_buffer_.empty())
       {
         handle_incoming_command(receive_buffer_);
@@ -153,13 +159,12 @@ void AutoslideDoor::loop()
   if (queued_upsend_reply_)
   {
     send_upsend_reply();
-    return; // one heavy action per tick
   }
 
   // 4) Reconcile desired state -> send exactly one command if idle
   if (send_next_update())
   {
-    return; // one heavy action per tick
+    ESP_LOGV(TAG, "Sent next update");
   }
 
   // 5) Offline detection
@@ -172,8 +177,10 @@ void AutoslideDoor::loop()
   // 6) Request setting update
   if (not first_poll_complete_ or now_ms - last_poll_time_ms_ >= POLL_INTERVAL_MS)
   {
+    ESP_LOGI(TAG, "Poll interval expired. Queueing full status request."); // <--- ADD THIS
     request_set_key_value(AutoslideKey::REQUEST_ALL, 0);
     first_poll_complete_ = true;
+    last_poll_time_ms_ = now_ms;
   }
 
   // 7) Publish current state if we make it this far
@@ -182,128 +189,153 @@ void AutoslideDoor::loop()
 
 bool AutoslideDoor::publish_current_state(const bool full_publish)
 {
-  // ESP_LOGV(TAG, "Publishing current state to ESPHome entities (full_publish=%s)...", full_publish ? "true" : "false");
+    static uint32_t last_publish_ms = 0;
+    if (esphome::millis() - last_publish_ms > 5000)
+    {
+        ESP_LOGV(TAG, "Publishing current state to ESPHome entities (full_publish=%s)...", full_publish ? "true" : "false");
+        last_publish_ms = esphome::millis();
+    }
 
   // only publish one element per fuction call unless force publish
 
   // Mode select
   if (mode_select_ != nullptr)
   {
-    if (full_publish || state_.door_mode != last_published_state_.door_mode)
+    const std::string current_mode_str = mode_to_string(state_.door_mode);
+    // Check if the Entity (ESPHome) thinks differently than the Door (Hardware)
+    if (full_publish || mode_select_->current_option() != current_mode_str)
     {
-      mode_select_->publish_state(mode_to_string(state_.door_mode));
-      last_published_state_.door_mode = state_.door_mode;
-      if (not full_publish) { return true; }
+      ESP_LOGV(TAG, "!!!!!!!!!!!!!!!!!!publishing current mode: %s, select mode: %s", current_mode_str.c_str(), mode_select_->current_option());
+      mode_select_->publish_state(current_mode_str);
+      // If we found a mismatch and fixed it, return true to yield (throttle updates)
+      if (!full_publish)
+      {
+          return true;
+      }
     }
   }
 
   // Open speed
   if (open_speed_switch_ != nullptr)
   {
-    if (full_publish || state_.open_speed != last_published_state_.open_speed)
+    const bool current_speed_bool = speed_to_bool(state_.open_speed);
+    if (full_publish || open_speed_switch_->state != current_speed_bool)
     {
-      open_speed_switch_->publish_state(speed_to_bool(state_.open_speed));
-      last_published_state_.open_speed = state_.open_speed;
-      if (not full_publish) { return true; }
+      open_speed_switch_->publish_state(current_speed_bool);
+      if (!full_publish)
+      {
+          return true;
+      }
     }
   }
 
   // Secure pet
   if (secure_pet_switch_ != nullptr)
   {
-    if (full_publish || state_.secure_pet != last_published_state_.secure_pet)
+    const bool current_pet_bool = secure_pet_to_bool(state_.secure_pet);
+    if (full_publish || secure_pet_switch_->state != current_pet_bool)
     {
-      secure_pet_switch_->publish_state(secure_pet_to_bool(state_.secure_pet));
-      last_published_state_.secure_pet = state_.secure_pet;
-      if (not full_publish) { return true; }
+      secure_pet_switch_->publish_state(current_pet_bool);
+      if (!full_publish)
+      {
+          return true;
+      }
     }
   }
 
   // Open hold duration
   if (open_hold_number_ != nullptr)
   {
-    if (full_publish || state_.open_hold_duration != last_published_state_.open_hold_duration)
+    // Cast to int to ensure we aren't comparing 5.0 to 5 and getting false negatives
+    if (full_publish || (int)open_hold_number_->state != state_.open_hold_duration)
     {
       open_hold_number_->publish_state(state_.open_hold_duration);
-      last_published_state_.open_hold_duration = state_.open_hold_duration;
-      if (not full_publish) { return true; }
+      if (!full_publish)
+      {
+          return true;
+      }
     }
   }
 
   // Forces
   if (open_force_number_ != nullptr)
   {
-    if (full_publish || state_.open_force != last_published_state_.open_force)
+    if (full_publish || (int)open_force_number_->state != state_.open_force)
     {
       open_force_number_->publish_state(state_.open_force);
-      last_published_state_.open_force = state_.open_force;
-      if (not full_publish) { return true; }
+      if (!full_publish)
+      {
+          return true;
+      }
     }
   }
 
   if (close_force_number_ != nullptr)
   {
-    if (full_publish || state_.close_force != last_published_state_.close_force)
+    if (full_publish || (int)close_force_number_->state != state_.close_force)
     {
       close_force_number_->publish_state(state_.close_force);
-      last_published_state_.close_force = state_.close_force;
-      if (not full_publish) { return true; }
+      if (!full_publish)
+      {
+          return true;
+      }
     }
   }
 
   if (close_end_force_number_ != nullptr)
   {
-    if (full_publish || state_.close_end_force != last_published_state_.close_end_force)
+    if (full_publish || (int)close_end_force_number_->state != state_.close_end_force)
     {
       close_end_force_number_->publish_state(state_.close_end_force);
-      last_published_state_.close_end_force = state_.close_end_force;
-      if (not full_publish) { return true; }
+      if (!full_publish)
+      {
+          return true;
+      }
     }
   }
 
   // Motion state text
   if (motion_state_sensor_ != nullptr)
   {
-    if (full_publish || state_.motion_state != last_published_state_.motion_state)
+    const std::string current_motion = motion_state_to_string(state_.motion_state);
+    if (full_publish || motion_state_sensor_->state != current_motion)
     {
-      const char *motion_str = "Unknown";
-      switch (state_.motion_state)
+      motion_state_sensor_->publish_state(current_motion);
+      if (!full_publish)
       {
-        case AutoslideMotionState::STOPPED: motion_str = "Stopped"; break;
-        case AutoslideMotionState::OPENING: motion_str = "Opening"; break;
-        case AutoslideMotionState::CLOSING: motion_str = "Closing"; break;
-        default: break;
+          return true;
       }
-      motion_state_sensor_->publish_state(motion_str);
-      last_published_state_.motion_state = state_.motion_state;
-      if (not full_publish) { return true; }
     }
   }
 
   // Lock state text
   if (lock_state_sensor_ != nullptr)
   {
-    if (full_publish || state_.lock_state != last_published_state_.lock_state)
+    const std::string current_lock = (state_.lock_state == AutoslideLockedState::LOCKED) ? "Locked" : "Unlocked";
+    if (full_publish || lock_state_sensor_->state != current_lock)
     {
-      const char *lock_str = (state_.lock_state == AutoslideLockedState::LOCKED) ? "Locked" : "Unlocked";
-      lock_state_sensor_->publish_state(lock_str);
-      last_published_state_.lock_state = state_.lock_state;
-      if (not full_publish) { return true; }
+      lock_state_sensor_->publish_state(current_lock);
+      if (!full_publish)
+      {
+          return true;
+      }
     }
   }
 
   // Connection sensor
   if (connected_sensor_ != nullptr)
   {
-    if (full_publish || state_.connected != last_published_state_.connected)
+    if (full_publish || connected_sensor_->state != state_.connected)
     {
       connected_sensor_->publish_state(state_.connected);
-      last_published_state_.connected = state_.connected;
-      if (not full_publish) { return true; }
+      if (!full_publish)
+      {
+          return true;
+      }
     }
   }
 
-  return full_publish;
+  return true;
 }
 
 // --- ESPHome Configuration Setter Methods ---
@@ -355,10 +387,6 @@ bool AutoslideDoor::send_update_command(const AutoslideKey key, const int value)
                       .value = value,
                       .sent_time_ms = esphome::millis()};
 
-  if (key == AutoslideKey::REQUEST_ALL)
-  {
-    last_poll_time_ms_ = esphome::millis();
-  }
   return true;
 }
 
@@ -480,6 +508,16 @@ void AutoslideDoor::parse_kv_payload(const char *payload, const size_t len)
   size_t i = 0;
   while (i < len)
   {
+    // protect from any whitespace in the message
+    while (i < len && (payload[i] == ' ' || payload[i] == '\t' || payload[i] == '\r' || payload[i] == '\n'))
+    {
+      i++;
+    }
+    if (i >= len)
+    {
+      break;
+    }
+
     // token start
     char key = payload[i];
     // find colon after single key
@@ -494,7 +532,7 @@ void AutoslideDoor::parse_kv_payload(const char *payload, const size_t len)
       {
           ++i;
       }
-      ESP_LOGW(TAG, "Malformed key-value in payload (missing ':')");
+      ESP_LOGW(TAG, "Malformed key-value in payload (missing ':' at index %u, char '%c')", i, key);
       continue;
     }
 
