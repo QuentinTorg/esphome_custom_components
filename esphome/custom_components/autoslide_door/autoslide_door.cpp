@@ -173,7 +173,7 @@ void AutoslideDoor::loop()
   }
 
   // 3) Reply to UPSEND (ack) if needed
-  if (queued_upsend_reply_)
+  if (pending_upsend_replies_ > 0)
   {
     send_upsend_reply();
   }
@@ -245,7 +245,6 @@ bool AutoslideDoor::publish_current_state(const bool full_publish)
     // Check if the Entity (ESPHome) thinks differently than the Door (Hardware)
     if (full_publish || mode_select_->current_option() != current_mode_str)
     {
-      ESP_LOGV(TAG, "!!!!!!!!!!!!!!!!!!publishing current mode: %s, select mode: %s", current_mode_str.c_str(), mode_select_->current_option().c_str());
       mode_select_->publish_state(current_mode_str);
       // If we found a mismatch and fixed it, return true to yield (throttle updates)
       if (!full_publish)
@@ -440,12 +439,15 @@ void AutoslideDoor::send_upsend_reply()
     ESP_LOGD(TAG, "Sending UPSEND Reply");
     write_str(cmd);
   }
-  queued_upsend_reply_ = false;
+  if (pending_upsend_replies_ > 0)
+  {
+    pending_upsend_replies_--;
+  }
 }
 
 bool AutoslideDoor::send_next_update()
 {
-    if (inflight_update_ or queued_upsend_reply_)
+    if (inflight_update_ || pending_upsend_replies_ > 0)
     {
         return false;
     }
@@ -516,7 +518,10 @@ void AutoslideDoor::handle_incoming_command(const std::string &command)
   else if (command_type == "UPSEND")
   {
     parse_kv_payload(payload_ptr, payload_len);
-    queued_upsend_reply_ = true;
+    if (pending_upsend_replies_ < 0xFF)
+    {
+      pending_upsend_replies_++;
+    }
     startup_wait_start_ms_.reset(); // first upsend means door is ready to receive commands
   }
   else if (command_type == "REPLY")

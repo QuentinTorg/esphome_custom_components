@@ -214,7 +214,7 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   // startup delay gating; cleared on first UPSEND
   std::optional<uint32_t> startup_wait_start_ms_{};
 
-  bool queued_upsend_reply_{false}; // must reply to every upsend from door
+  uint8_t pending_upsend_replies_{0}; // must reply to every upsend from door
 
   // Retry/backoff state for REQUEST_ALL after timeouts
   uint8_t retry_attempts_{0};
