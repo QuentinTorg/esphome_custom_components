@@ -8,9 +8,8 @@
 namespace esphome {
 namespace autoslide_door {
 
-static const uint32_t COMMAND_TIMEOUT_MS = 5000;   // timeout with no response
-static const uint32_t POLL_INTERVAL_MS   = 60000;  // periodic poll just in case
-static const uint32_t OFFLINE_TIMEOUT_MS = 2.1 * POLL_INTERVAL_MS; // 2 missed polls indicate timeout
+static const uint32_t COMMAND_TIMEOUT_MS = 1000;   // timeout with no response
+static const uint32_t OFFLINE_TIMEOUT_MS = 5000; // 2 missed polls indicate timeout
 static const uint32_t STARTUP_DELAY_MS = 25000; // delay on startup waiting for first command
 
 // --- Helper Functions for String Conversion (from .h) ---
@@ -153,6 +152,11 @@ void AutoslideDoor::loop()
     ESP_LOGE(TAG, "Command timeout! Did not receive AT+RESULT within %u ms.", COMMAND_TIMEOUT_MS);
     inflight_update_.reset();
     request_set_key_value(AutoslideKey::REQUEST_ALL, 0);
+    if (state_.connected)
+    {
+      ESP_LOGW(TAG, "No UART response within %u ms, marking Autoslide disconnected.", COMMAND_TIMEOUT_MS);
+      state_.connected = false;
+    }
   }
 
   // 3) Reply to UPSEND (ack) if needed
@@ -167,20 +171,32 @@ void AutoslideDoor::loop()
     ESP_LOGV(TAG, "Sent next update");
   }
 
-  // 5) Offline detection
-  if (state_.connected && last_rx_time_ms_ != 0 && (now_ms - last_rx_time_ms_ >= OFFLINE_TIMEOUT_MS))
+  // 5) Offline detection (only when we're waiting on a response)
+  if (state_.connected && inflight_update_)
   {
-    ESP_LOGW(TAG, "No UART activity for %u ms, marking Autoslide disconnected.", OFFLINE_TIMEOUT_MS);
-    state_.connected = false;
+    const uint32_t sent_ms = inflight_update_->sent_time_ms;
+    const bool rx_after_send = last_rx_time_ms_.has_value() && last_rx_time_ms_.value() >= sent_ms;
+    if (!rx_after_send && (now_ms - sent_ms > OFFLINE_TIMEOUT_MS))
+    {
+      ESP_LOGW(TAG, "No UART response for %u ms after command, marking Autoslide disconnected.", OFFLINE_TIMEOUT_MS);
+      if (!last_rx_time_ms_.has_value())
+      {
+        ESP_LOGE(TAG, "last_rx_time_ms_: has no value");
+      }
+      else
+      {
+        ESP_LOGW(TAG, "last_rx_time_ms_:%u, last_tx_time_ms_:%u", last_rx_time_ms_.value(), sent_ms);
+      }
+      state_.connected = false;
+    }
   }
 
   // 6) Request setting update
-  if (not first_poll_complete_ or now_ms - last_poll_time_ms_ >= POLL_INTERVAL_MS)
+  if (not first_poll_complete_)
   {
     ESP_LOGI(TAG, "Poll interval expired. Queueing full status request."); // <--- ADD THIS
     request_set_key_value(AutoslideKey::REQUEST_ALL, 0);
     first_poll_complete_ = true;
-    last_poll_time_ms_ = now_ms;
   }
 
   // 7) Publish current state if we make it this far
@@ -589,6 +605,7 @@ void AutoslideDoor::update_state(const AutoslideKey key, const int value)
         [[fallthrough]];
     case AutoslideKey::REQUEST_ALL:
         // nothing to do for these two, there is no held internal state for these keys
+        ESP_LOGE(TAG, "request all response received successfully");
         break;
     case AutoslideKey::RESULT:
         {
@@ -601,8 +618,6 @@ void AutoslideDoor::update_state(const AutoslideKey key, const int value)
             else if (value == 0)
             {
                 ESP_LOGE(TAG, "Command failed to execute (r:%d).", value);
-                // set up a new request to poll
-                last_poll_time_ms_ = 0;
             }
             break;
         }

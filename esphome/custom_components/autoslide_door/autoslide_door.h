@@ -203,8 +203,7 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   std::optional<InflightUpdate> inflight_update_{};
 
   // Connection health
-  uint32_t last_rx_time_ms_{0};   // last time we received any AT frame
-  uint32_t last_poll_time_ms_{0}; // last time we sent a periodic poll
+  std::optional<uint32_t> last_rx_time_ms_{};   // last time we received any AT frame
   bool first_poll_complete_{false}; // used to initiate immediate first poll
 
   // when is it okay to send commands even if door never sent first command

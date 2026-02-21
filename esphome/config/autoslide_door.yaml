@@ -17,38 +17,26 @@ esp32:
 
 # Enable logging
 logger:
-  #level: VERY_VERBOSE
-  level: INFO
-
-# Enable Home Assistant API
-#
-# api:
-#   encryption:
-#     key: !secret autoslide_door_encryption_key
-#
-# # Allow Over-The-Air updates
-# ota:
-#   - platform: esphome
-#     id: my_ota
-#     password: !secret ota_password
+  level: VERY_VERBOSE
+  #level: INFO
 
 # Custom Component Definition
 # Points ESPHome to your local custom_components folder for dev work
-# external_components:
-#   - source:
-#       type: local
-#       path: ../custom_components
-#     components: [ autoslide_door ]
-
-# Use this external component in home assistant
 external_components:
   - source:
-      type: git
-      url: https://github.com/QuentinTorg/esphome_custom_components
-      ref: main
-      path: esphome/custom_components
+      type: local
+      path: ../custom_components
     components: [ autoslide_door ]
-    #refresh: 60s
+
+# Use this external component in home assistant
+# external_components:
+#   - source:
+#       type: git
+#       url: https://github.com/QuentinTorg/esphome_custom_components
+#       ref: main
+#       path: esphome/custom_components
+#     components: [ autoslide_door ]
+#     #refresh: 60s
 
 uart:
   id: autoslide_uart
@@ -105,6 +93,11 @@ autoslide_door:
   connected:
     name: "Connected"
     device_class: connectivity
+
+  # temporary debug sensor
+  debug_last_message:
+    name: "Autoslide Raw Debug"
+    icon: "mdi:bug"
 
 binary_sensor:
   - platform: gpio
