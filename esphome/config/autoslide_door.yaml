@@ -17,26 +17,27 @@ esp32:
 
 # Enable logging
 logger:
-  level: VERY_VERBOSE
+  level: VERBOSE
+  #level: VERY_VERBOSE
   #level: INFO
 
 # Custom Component Definition
 # Points ESPHome to your local custom_components folder for dev work
-external_components:
-  - source:
-      type: local
-      path: ../custom_components
-    components: [ autoslide_door ]
-
-# Use this external component in home assistant
 # external_components:
 #   - source:
-#       type: git
-#       url: https://github.com/QuentinTorg/esphome_custom_components
-#       ref: main
-#       path: esphome/custom_components
+#       type: local
+#       path: ../custom_components
 #     components: [ autoslide_door ]
-#     #refresh: 60s
+
+# Use this external component in home assistant
+external_components:
+  - source:
+      type: git
+      url: https://github.com/QuentinTorg/esphome_custom_components
+      ref: main
+      path: esphome/custom_components
+    components: [ autoslide_door ]
+    #refresh: 60s
 
 uart:
   id: autoslide_uart
