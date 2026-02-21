@@ -9,7 +9,7 @@ namespace esphome {
 namespace autoslide_door {
 
 static const uint32_t COMMAND_TIMEOUT_MS = 1000;   // timeout with no response
-static const uint32_t OFFLINE_TIMEOUT_MS = 5000; // 2 missed polls indicate timeout
+static const uint32_t OFFLINE_TIMEOUT_MS = 5000; // no UART response within this window
 static const uint32_t STARTUP_DELAY_MS = 25000; // delay on startup waiting for first command
 
 // --- Helper Functions for String Conversion (from .h) ---
@@ -218,7 +218,7 @@ void AutoslideDoor::loop()
   // 6) Request setting update
   if (not first_poll_complete_)
   {
-    ESP_LOGI(TAG, "Poll interval expired. Queueing full status request."); // <--- ADD THIS
+    ESP_LOGI(TAG, "Startup sync: queueing full status request.");
     request_set_key_value(AutoslideKey::REQUEST_ALL, 0);
     first_poll_complete_ = true;
   }
@@ -434,14 +434,20 @@ void AutoslideDoor::send_upsend_reply()
   char cmd[20];
   int n = snprintf(cmd, sizeof(cmd), "AT+REPLY,r:1%c", (char)0x1B);
 
-  if (n > 0 && n < (int)sizeof(cmd))
-  {
-    ESP_LOGD(TAG, "Sending UPSEND Reply");
-    write_str(cmd);
-  }
-  if (pending_upsend_replies_ > 0)
+    bool sent = false;
+    if (n > 0 && n < (int)sizeof(cmd))
+    {
+      ESP_LOGD(TAG, "Sending UPSEND Reply");
+      write_str(cmd);
+      sent = true;
+    }
+  if (sent && pending_upsend_replies_ > 0)
   {
     pending_upsend_replies_--;
+  }
+  else if (!sent)
+  {
+    ESP_LOGW(TAG, "Failed to send UPSEND reply");
   }
 }
 
@@ -521,6 +527,10 @@ void AutoslideDoor::handle_incoming_command(const std::string &command)
     if (pending_upsend_replies_ < 0xFF)
     {
       pending_upsend_replies_++;
+    }
+    else
+    {
+      ESP_LOGW(TAG, "UPSEND reply queue saturated; dropping UPSEND ack");
     }
     startup_wait_start_ms_.reset(); // first upsend means door is ready to receive commands
   }
@@ -622,21 +632,91 @@ void AutoslideDoor::update_state(const AutoslideKey key, const int value)
 {
   switch (key)
   {
-    case AutoslideKey::MODE: state_.door_mode = static_cast<AutoslideMode>(value); break;
-    case AutoslideKey::LOCK_STATE: state_.lock_state = static_cast<AutoslideLockedState>(value); break;
-    case AutoslideKey::OPEN_SPEED: state_.open_speed = static_cast<AutoslideOpenSpeed>(value); break;
-    case AutoslideKey::SECURE_PET: state_.secure_pet = static_cast<AutoslideSecurePet>(value); break;
-    case AutoslideKey::HOLD_TIME: state_.open_hold_duration = static_cast<uint8_t>(value); break;
-    case AutoslideKey::OPEN_FORCE: state_.open_force = static_cast<uint8_t>(value); break;
-    case AutoslideKey::CLOSE_FORCE: state_.close_force = static_cast<uint8_t>(value); break;
-    case AutoslideKey::CLOSE_END_FORCE: state_.close_end_force = static_cast<uint8_t>(value); break;
-    case AutoslideKey::MOTION_STATE: state_.motion_state = static_cast<AutoslideMotionState>(value); break;
-    case AutoslideKey::MOTION_TRIGGER: state_.motion_trigger = static_cast<uint8_t>(value); break;
+    case AutoslideKey::MODE:
+        if (value < 0 || value > 3)
+        {
+            ESP_LOGW(TAG, "Invalid MODE value: %d", value);
+            break;
+        }
+        state_.door_mode = static_cast<AutoslideMode>(value);
+        break;
+    case AutoslideKey::LOCK_STATE:
+        if (value < 0 || value > 1)
+        {
+            ESP_LOGW(TAG, "Invalid LOCK_STATE value: %d", value);
+            break;
+        }
+        state_.lock_state = static_cast<AutoslideLockedState>(value);
+        break;
+    case AutoslideKey::OPEN_SPEED:
+        if (value < 0 || value > 1)
+        {
+            ESP_LOGW(TAG, "Invalid OPEN_SPEED value: %d", value);
+            break;
+        }
+        state_.open_speed = static_cast<AutoslideOpenSpeed>(value);
+        break;
+    case AutoslideKey::SECURE_PET:
+        if (value < 0 || value > 1)
+        {
+            ESP_LOGW(TAG, "Invalid SECURE_PET value: %d", value);
+            break;
+        }
+        state_.secure_pet = static_cast<AutoslideSecurePet>(value);
+        break;
+    case AutoslideKey::HOLD_TIME:
+        if (value < 0 || value > 25)
+        {
+            ESP_LOGW(TAG, "Invalid HOLD_TIME value: %d", value);
+            break;
+        }
+        state_.open_hold_duration = static_cast<uint8_t>(value);
+        break;
+    case AutoslideKey::OPEN_FORCE:
+        if (value < 0 || value > 7)
+        {
+            ESP_LOGW(TAG, "Invalid OPEN_FORCE value: %d", value);
+            break;
+        }
+        state_.open_force = static_cast<uint8_t>(value);
+        break;
+    case AutoslideKey::CLOSE_FORCE:
+        if (value < 0 || value > 7)
+        {
+            ESP_LOGW(TAG, "Invalid CLOSE_FORCE value: %d", value);
+            break;
+        }
+        state_.close_force = static_cast<uint8_t>(value);
+        break;
+    case AutoslideKey::CLOSE_END_FORCE:
+        if (value < 0 || value > 7)
+        {
+            ESP_LOGW(TAG, "Invalid CLOSE_END_FORCE value: %d", value);
+            break;
+        }
+        state_.close_end_force = static_cast<uint8_t>(value);
+        break;
+    case AutoslideKey::MOTION_STATE:
+        if (value < 0 || value > 2)
+        {
+            ESP_LOGW(TAG, "Invalid MOTION_STATE value: %d", value);
+            break;
+        }
+        state_.motion_state = static_cast<AutoslideMotionState>(value);
+        break;
+    case AutoslideKey::MOTION_TRIGGER:
+        if (value < 0 || value > 5)
+        {
+            ESP_LOGW(TAG, "Invalid MOTION_TRIGGER value: %d", value);
+            break;
+        }
+        state_.motion_trigger = static_cast<uint8_t>(value);
+        break;
     case AutoslideKey::TRIGGER:
         [[fallthrough]];
     case AutoslideKey::REQUEST_ALL:
         // nothing to do for these two, there is no held internal state for these keys
-        ESP_LOGE(TAG, "request all response received successfully");
+        ESP_LOGV(TAG, "Request/trigger response received");
         break;
     case AutoslideKey::RESULT:
         {
