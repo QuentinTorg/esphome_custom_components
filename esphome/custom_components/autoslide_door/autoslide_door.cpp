@@ -90,7 +90,7 @@ void AutoslideDoor::setup()
   receive_buffer_.reserve(256);
 
   // don't send commands until first command arrives or startup delay completes
-  startup_timeout_stamp_ms = millis() + STARTUP_DELAY_MS;
+  startup_wait_start_ms_ = millis();
 }
 
 void AutoslideDoor::loop()
@@ -141,9 +141,13 @@ void AutoslideDoor::loop()
 
   // wait for door to send first command before sending any updates.
   // If we reach timeout, assume the door is already running
-  if (now_ms < startup_timeout_stamp_ms)
+  if (startup_wait_start_ms_.has_value())
   {
+    if ((uint32_t) (now_ms - startup_wait_start_ms_.value()) < STARTUP_DELAY_MS)
+    {
       return;
+    }
+    startup_wait_start_ms_.reset();
   }
 
   // 2) Handle Command Timeout
@@ -193,8 +197,10 @@ void AutoslideDoor::loop()
   if (state_.connected && inflight_update_)
   {
     const uint32_t sent_ms = inflight_update_->sent_time_ms;
-    const bool rx_after_send = last_rx_time_ms_.has_value() && last_rx_time_ms_.value() >= sent_ms;
-    if (!rx_after_send && (now_ms - sent_ms > OFFLINE_TIMEOUT_MS))
+    const bool sent_timed_out = (uint32_t) (now_ms - sent_ms) > OFFLINE_TIMEOUT_MS;
+    const bool rx_timed_out = !last_rx_time_ms_.has_value() ||
+        (uint32_t) (now_ms - last_rx_time_ms_.value()) > OFFLINE_TIMEOUT_MS;
+    if (sent_timed_out && rx_timed_out)
     {
       ESP_LOGW(TAG, "No UART response for %u ms after command, marking Autoslide disconnected.", OFFLINE_TIMEOUT_MS);
       if (!last_rx_time_ms_.has_value())
@@ -239,7 +245,7 @@ bool AutoslideDoor::publish_current_state(const bool full_publish)
     // Check if the Entity (ESPHome) thinks differently than the Door (Hardware)
     if (full_publish || mode_select_->current_option() != current_mode_str)
     {
-      ESP_LOGV(TAG, "!!!!!!!!!!!!!!!!!!publishing current mode: %s, select mode: %s", current_mode_str.c_str(), mode_select_->current_option());
+      ESP_LOGV(TAG, "!!!!!!!!!!!!!!!!!!publishing current mode: %s, select mode: %s", current_mode_str.c_str(), mode_select_->current_option().c_str());
       mode_select_->publish_state(current_mode_str);
       // If we found a mismatch and fixed it, return true to yield (throttle updates)
       if (!full_publish)
@@ -392,7 +398,7 @@ bool AutoslideDoor::send_update_command(const AutoslideKey key, const int value)
 {
   if (inflight_update_)
   {
-    ESP_LOGW(TAG, "Cannot send command ('%c':%d). Waiting for AT+RESULT from previous command.", key, value);
+    ESP_LOGW(TAG, "Cannot send command ('%c':%d). Waiting for AT+RESULT from previous command.", static_cast<char>(key), value);
     return false;
   }
 
@@ -400,16 +406,16 @@ bool AutoslideDoor::send_update_command(const AutoslideKey key, const int value)
   int n;
   if (key == AutoslideKey::HOLD_TIME)
   {
-    n = snprintf(cmd, sizeof(cmd), "AT+UPDATE,%c:%02d%c", key, value, (char)0x1B);
+    n = snprintf(cmd, sizeof(cmd), "AT+UPDATE,%c:%02d%c", static_cast<char>(key), value, (char)0x1B);
   }
   else
   {
-    n = snprintf(cmd, sizeof(cmd), "AT+UPDATE,%c:%d%c", key, value, (char)0x1B);
+    n = snprintf(cmd, sizeof(cmd), "AT+UPDATE,%c:%d%c", static_cast<char>(key), value, (char)0x1B);
   }
 
   if (n <= 0 || n >= (int)sizeof(cmd))
   {
-    ESP_LOGE(TAG, "Command formatting overflow for key '%c'", key);
+    ESP_LOGE(TAG, "Command formatting overflow for key '%c'", static_cast<char>(key));
     return false;
   }
 
@@ -511,7 +517,7 @@ void AutoslideDoor::handle_incoming_command(const std::string &command)
   {
     parse_kv_payload(payload_ptr, payload_len);
     queued_upsend_reply_ = true;
-    startup_timeout_stamp_ms = 0; // first upsend means door is ready to receive commands
+    startup_wait_start_ms_.reset(); // first upsend means door is ready to receive commands
   }
   else if (command_type == "REPLY")
   {
@@ -642,7 +648,7 @@ void AutoslideDoor::update_state(const AutoslideKey key, const int value)
             break;
         }
     default:
-      ESP_LOGW(TAG, "Received unknown key '%c' with value %d", key, value);
+      ESP_LOGW(TAG, "Received unknown key '%c' with value %d", static_cast<char>(key), value);
       return;
   }
 }
@@ -689,7 +695,7 @@ void AutoslideSettingNumber::control(float value)
   int int_value = (int) (value >= 0 ? value + 0.5f : value - 0.5f); // lroundf without <cmath>
 
   parent_->request_set_key_value(key_, static_cast<int>(int_value));
-  ESP_LOGI(TAG, "Queued setting number (%c): %i", key_, int_value);
+  ESP_LOGI(TAG, "Queued setting number (%c): %i", static_cast<char>(key_), int_value);
 }
 
 void AutoslideOnOffSwitch::write_state(bool value)
@@ -710,7 +716,7 @@ void AutoslideOnOffSwitch::write_state(bool value)
   }
   else
   {
-    ESP_LOGE(TAG, "Unknown switch key '%c' in write_state", key_);
+    ESP_LOGE(TAG, "Unknown switch key '%c' in write_state", static_cast<char>(key_));
   }
 }
 

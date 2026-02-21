@@ -211,9 +211,8 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   std::optional<uint32_t> last_rx_time_ms_{};   // last time we received any AT frame
   bool first_poll_complete_{false}; // used to initiate immediate first poll
 
-  // when is it okay to send commands even if door never sent first command
-  // stamp set to 0 when first command arrives
-  uint32_t startup_timeout_stamp_ms{25000};
+  // startup delay gating; cleared on first UPSEND
+  std::optional<uint32_t> startup_wait_start_ms_{};
 
   bool queued_upsend_reply_{false}; // must reply to every upsend from door
 
