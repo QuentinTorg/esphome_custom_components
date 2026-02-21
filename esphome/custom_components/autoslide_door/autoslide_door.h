@@ -108,6 +108,11 @@ struct InflightUpdate {
     uint32_t sent_time_ms{0};
 };
 
+struct RetryBackoff {
+    uint32_t start_ms{0};
+    uint32_t delay_ms{0};
+};
+
 // Free utility functions for manipulating the types
 std::string mode_to_string(AutoslideMode mode);
 std::string motion_state_to_string(AutoslideMotionState state);
@@ -211,6 +216,10 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   uint32_t startup_timeout_stamp_ms{25000};
 
   bool queued_upsend_reply_{false}; // must reply to every upsend from door
+
+  // Retry/backoff state for REQUEST_ALL after timeouts
+  uint8_t retry_attempts_{0};
+  std::optional<RetryBackoff> retry_backoff_{};
 
   // Pointers to the ESPHome entities defined in YAML
   select::Select *mode_select_{nullptr};

@@ -151,18 +151,36 @@ void AutoslideDoor::loop()
   {
     ESP_LOGE(TAG, "Command timeout! Did not receive AT+RESULT within %u ms.", COMMAND_TIMEOUT_MS);
     inflight_update_.reset();
-    request_set_key_value(AutoslideKey::REQUEST_ALL, 0);
     if (state_.connected)
     {
       ESP_LOGW(TAG, "No UART response within %u ms, marking Autoslide disconnected.", COMMAND_TIMEOUT_MS);
       state_.connected = false;
     }
+
+    // Schedule a delayed REQUEST_ALL with exponential backoff
+    const uint8_t capped_attempts = retry_attempts_ > 5 ? 5 : retry_attempts_;
+    uint32_t delay_ms = 1000u << capped_attempts;
+    if (delay_ms > 30000u)
+    {
+      delay_ms = 30000u;
+    }
+    retry_backoff_ = RetryBackoff{.start_ms = now_ms, .delay_ms = delay_ms};
+    retry_attempts_++;
   }
 
   // 3) Reply to UPSEND (ack) if needed
   if (queued_upsend_reply_)
   {
     send_upsend_reply();
+  }
+
+  // 3b) If backoff elapsed, queue a single REQUEST_ALL retry
+  if (retry_backoff_.has_value() &&
+      (uint32_t) (now_ms - retry_backoff_->start_ms) >= retry_backoff_->delay_ms)
+  {
+    ESP_LOGI(TAG, "Retry backoff elapsed. Queueing full status request.");
+    request_set_key_value(AutoslideKey::REQUEST_ALL, 0);
+    retry_backoff_.reset();
   }
 
   // 4) Reconcile desired state -> send exactly one command if idle
@@ -511,6 +529,8 @@ void AutoslideDoor::handle_incoming_command(const std::string &command)
   {
     state_.connected = true;
   }
+  retry_attempts_ = 0;
+  retry_backoff_.reset();
 }
 
 // Split payload by commas, each token like "<k>:<v>" where k is one char
