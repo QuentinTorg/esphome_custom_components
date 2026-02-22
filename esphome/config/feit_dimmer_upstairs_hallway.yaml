@@ -6,6 +6,6 @@ packages:
     vars:
       device_name: upstairs-hallway-dimmer
       friendly_name: Upstairs Hallway
-      restore_default_brightness: 'false'
+      restore_default_brightness: 'true'
       auto_off_enabled: 'true'
       auto_off_delay: 30min
