@@ -17,20 +17,9 @@ esp32:
 
 # Enable logging
 logger:
+  level: VERBOSE
   #level: VERY_VERBOSE
-  level: INFO
-
-# Enable Home Assistant API
-#
-# api:
-#   encryption:
-#     key: !secret autoslide_door_encryption_key
-#
-# # Allow Over-The-Air updates
-# ota:
-#   - platform: esphome
-#     id: my_ota
-#     password: !secret ota_password
+  #level: INFO
 
 # Custom Component Definition
 # Points ESPHome to your local custom_components folder for dev work
@@ -105,6 +94,11 @@ autoslide_door:
   connected:
     name: "Connected"
     device_class: connectivity
+
+  # temporary debug sensor
+  debug_last_message:
+    name: "Autoslide Raw Debug"
+    icon: "mdi:bug"
 
 binary_sensor:
   - platform: gpio

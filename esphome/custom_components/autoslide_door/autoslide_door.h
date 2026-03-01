@@ -108,6 +108,11 @@ struct InflightUpdate {
     uint32_t sent_time_ms{0};
 };
 
+struct RetryBackoff {
+    uint32_t start_ms{0};
+    uint32_t delay_ms{0};
+};
+
 // Free utility functions for manipulating the types
 std::string mode_to_string(AutoslideMode mode);
 std::string motion_state_to_string(AutoslideMotionState state);
@@ -159,6 +164,9 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   void set_open_button(button::Button *button);
   void set_connected_sensor(binary_sensor::BinarySensor *sensor);
 
+  // temporary debug sensor
+  void set_debug_uart_sensor(text_sensor::TextSensor *sensor) { debug_uart_sensor_ = sensor; }
+
  protected:
   // Internal: send a single AT+UPDATE or action; called only from loop reconcile
   bool send_update_command(const AutoslideKey key, const int value);
@@ -178,7 +186,6 @@ class AutoslideDoor : public Component, public uart::UARTDevice
 
   // Current state and caches
   AutoslideState state_{};
-  AutoslideState last_published_state_{};
 
   // array serves as a map, char value casted to int is the location in the array
   // ordering is also command send priority
@@ -201,15 +208,17 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   std::optional<InflightUpdate> inflight_update_{};
 
   // Connection health
-  uint32_t last_rx_time_ms_{0};   // last time we received any AT frame
-  uint32_t last_poll_time_ms_{0}; // last time we sent a periodic poll
-  uint32_t first_poll_complete_{false}; // used to initiate immediate first poll
+  std::optional<uint32_t> last_rx_time_ms_{};   // last time we received any AT frame
+  bool first_poll_complete_{false}; // used to initiate immediate first poll
 
-  // when is it okay to send commands even if door never sent first command
-  // stamp set to 0 when first command arrives
-  uint32_t startup_timeout_stamp_ms{25000};
+  // startup delay gating; cleared on first UPSEND
+  std::optional<uint32_t> startup_wait_start_ms_{};
 
-  bool queued_upsend_reply_{false}; // must reply to every upsend from door
+  uint8_t pending_upsend_replies_{0}; // must reply to every upsend from door
+
+  // Retry/backoff state for REQUEST_ALL after timeouts
+  uint8_t retry_attempts_{0};
+  std::optional<RetryBackoff> retry_backoff_{};
 
   // Pointers to the ESPHome entities defined in YAML
   select::Select *mode_select_{nullptr};
@@ -223,6 +232,7 @@ class AutoslideDoor : public Component, public uart::UARTDevice
   text_sensor::TextSensor *lock_state_sensor_{nullptr};
   button::Button *open_button_{nullptr};
   binary_sensor::BinarySensor *connected_sensor_{nullptr};
+  text_sensor::TextSensor *debug_uart_sensor_{nullptr};
 };
 
 // --- Custom Control Implementations ---

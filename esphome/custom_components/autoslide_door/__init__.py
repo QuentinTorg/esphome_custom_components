@@ -31,6 +31,9 @@ CONF_LOCK_STATE_SENSOR = "lock_state"
 CONF_OPEN_BUTTON = "open_button"
 CONF_CONNECTED_SENSOR = "connected"
 
+# temporary debug sensor
+CONF_DEBUG_UART_SENSOR = "debug_last_message"
+
 # --- Classes for entities we construct ---
 AutoslideModeSelect = autoslide_ns.class_("AutoslideModeSelect", select.Select)
 AutoslideOnOffSwitch = autoslide_ns.class_("AutoslideOnOffSwitch", switch.Switch)
@@ -65,6 +68,9 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_OPEN_BUTTON): button.button_schema(AutoslideOpenButton),
 
             cv.Optional(CONF_CONNECTED_SENSOR): binary_sensor.binary_sensor_schema(),
+
+            # temporary debug sensor
+            cv.Optional(CONF_DEBUG_UART_SENSOR): text_sensor.text_sensor_schema(),
         }
     )
     .extend(uart.UART_DEVICE_SCHEMA)
@@ -170,3 +176,8 @@ async def to_code(config):
             config[CONF_CONNECTED_SENSOR]
         )
         cg.add(var.set_connected_sensor(cs))
+
+    # temporary debug sensor
+    if CONF_DEBUG_UART_SENSOR in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_DEBUG_UART_SENSOR])
+        cg.add(var.set_debug_uart_sensor(sens))
